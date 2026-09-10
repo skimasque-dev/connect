@@ -1,0 +1,32 @@
+name: smoke
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate action.yml against the schema
+        run: npx --yes @action-validator/cli ./action.yml
+
+      - name: Shellcheck the composite steps
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > steps.sh
+          import yaml
+          spec = yaml.safe_load(open("action.yml"))
+          print("#!/usr/bin/env bash")
+          for i, step in enumerate(spec["runs"]["steps"]):
+              if "run" in step:
+                  print(f'# --- step {i}: {step.get("name", "")}')
+                  print(step["run"])
+          PY
+          # Advisory: the inline scripts reference runner-provided env vars.
+          shellcheck -s bash -e SC2148,SC2034 steps.sh || true
