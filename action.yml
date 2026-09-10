@@ -40,7 +40,7 @@ inputs:
     required: false
     default: ""
   repository:
-    description: "owner/repo to download the release from. Defaults to this action's repository."
+    description: "owner/repo to download the release from. Defaults to skimasque-dev/skimasque."
     required: false
     default: ""
   client-bin:
@@ -58,7 +58,7 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version || github.action_ref }}
-        REPOSITORY: ${{ inputs.repository || github.action_repository }}
+        REPOSITORY: ${{ inputs.repository || 'skimasque-dev/skimasque' }}
       run: |
         set -euo pipefail
         case "${RUNNER_OS}-${RUNNER_ARCH}" in
@@ -82,7 +82,7 @@ runs:
         fi
 
         base="https://github.com/${REPOSITORY}/releases/download/${VERSION}"
-        asset="skimasque-client-${VERSION}-${target}.tar.gz"
+        asset="skimasque-${VERSION}-${target}.tar.gz"
         dest="${RUNNER_TEMP}/skimasque"
         mkdir -p "${dest}"
 

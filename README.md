@@ -34,15 +34,16 @@ jobs:
 | `application` | no | — | Application name to declare (sent as `X-Masque-Application`, matched by policy). |
 | `ca` | no | — | Path to a PEM the gateway's certificate chains to (for a private CA). |
 | `listen` | no | `127.0.0.1:1080` | Local address for the SOCKS5 relay. |
-| `version` | no | the ref this action was called at | `skimasque-client` release to install (e.g. `v0.3.0`). A moving ref (`v1`, `main`, a SHA) resolves to the latest release. |
-| `repository` | no | this action's repo | `owner/repo` to download the client release from. |
+| `version` | no | the ref this action was called at | `skimasque` release to install (e.g. `v0.3.0`). A moving ref (`v1`, `main`, a SHA) resolves to the latest release. |
+| `repository` | no | `skimasque-dev/skimasque` | `owner/repo` to download the release from. |
 | `client-bin` | no | — | Use this `skimasque-client` binary instead of downloading a release. |
 
 ## How it works
 
-1. **Install** — downloads `skimasque-client-<version>-<target>.tar.gz` (and its
-   `.sha256`) from this repo's releases, verifies the checksum, and puts the
-   binary on `PATH`. Skipped when `client-bin` is set.
+1. **Install** — downloads `skimasque-<version>-<target>.tar.gz` (and its
+   `.sha256`) from the [`skimasque-dev/skimasque`](https://github.com/skimasque-dev/skimasque)
+   release, verifies the checksum, and puts `skimasque-client` on `PATH`.
+   Skipped when `client-bin` is set.
 2. **Open the tunnel** — runs `skimasque-client --github-oidc`: the client reads
    the runner's OIDC token, POSTs it to the gateway's exchange endpoint, receives
    a ~1h credential, starts `skimasque-client … socks5` in the background, waits
