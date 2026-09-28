@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skimasque-dev/connect — identity-bound tunnels for GitHub Actions</title>
+<meta name="description" content="A GitHub Action that opens an identity-bound MASQUE tunnel for the rest of a CI job. OIDC in, short-lived credential out, and every connection checked against policy.">
+<meta property="og:title" content="skimasque-dev/connect">
+<meta property="og:description" content="One workflow step gives a GitHub Actions job exactly the network access its policy allows.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  /* Shared with the SkiMasque project site (skimasque-dev/skimasque, site/). */
+  :root {
+    --bg: #f7f8f6;
+    --bg-alt: #eef1ee;
+    --surface: #ffffff;
+    --text: #15202b;
+    --muted: #55616d;
+    --border: #d9dfdc;
+    --accent: #0d8a78;
+    --accent-strong: #09685a;
+    --accent-soft: #d6f2ec;
+    --deny: #c2410c;
+    --code-bg: #0f1a22;
+    --code-text: #d7e3ea;
+    --code-muted: #7d909c;
+    --code-key: #7dd3c0;
+    --code-str: #f5c78a;
+    --radius: 12px;
+    --maxw: 1120px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1218;
+      --bg-alt: #0f1820;
+      --surface: #131e27;
+      --text: #e4ecf0;
+      --muted: #93a3ae;
+      --border: #22313c;
+      --accent: #5eead4;
+      --accent-strong: #99f6e4;
+      --accent-soft: #10302c;
+      --deny: #fb923c;
+      --code-bg: #081016;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-strong); }
+  code, pre { font-family: var(--mono); }
+  :not(pre) > code {
+    font-size: .9em;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    padding: .1em .35em;
+    border-radius: 5px;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 16px; }
+  @media (min-width: 720px) { .wrap { padding: 0 32px; } }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  header.nav .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); text-decoration: none; letter-spacing: -.01em; }
+  .brand img { width: 26px; height: 26px; }
+  .brand .sub { color: var(--muted); font-weight: 500; font-family: var(--mono); font-size: 14px; }
+  nav.links { display: none; gap: 22px; margin-left: auto; }
+  nav.links a { color: var(--muted); text-decoration: none; font-size: 15px; }
+  nav.links a:hover { color: var(--text); }
+  .nav-cta { margin-left: auto; }
+  @media (min-width: 860px) { nav.links { display: flex; } .nav-cta { margin-left: 0; } }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-radius: 999px;
+    font-weight: 600; font-size: 15px; text-decoration: none;
+    border: 1px solid transparent; transition: transform .1s, background .15s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: #04211c; }
+  .btn-primary:hover { background: var(--accent-strong); }
+  .btn-ghost { border-color: var(--border); color: var(--text); background: var(--surface); }
+  .btn-sm { padding: 7px 14px; font-size: 14px; }
+  @media (prefers-color-scheme: light) { .btn-primary { color: #fff; } }
+
+  /* Hero */
+  .hero { padding: 72px 0 56px; }
+  .hero-grid { display: grid; gap: 40px; align-items: center; }
+  @media (min-width: 960px) { .hero-grid { grid-template-columns: 1fr 1.05fr; } .hero { padding: 104px 0 88px; } }
+  .eyebrow {
+    display: inline-block; font: 600 13px/1 var(--mono); letter-spacing: .04em;
+    color: var(--accent-strong); background: var(--accent-soft);
+    padding: 7px 11px; border-radius: 999px; margin-bottom: 20px;
+  }
+  h1 { font-size: clamp(34px, 5.4vw, 56px); line-height: 1.06; letter-spacing: -.03em; margin: 0 0 20px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: clamp(17px, 2vw, 19px); color: var(--muted); max-width: 36em; margin: 0 0 28px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  /* Sections */
+  section { padding: 72px 0; }
+  section.alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .kicker { font: 600 13px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-strong); margin: 0 0 10px; }
+  h2 { font-size: clamp(26px, 3.6vw, 38px); line-height: 1.15; letter-spacing: -.02em; margin: 0 0 14px; }
+  .section-intro { color: var(--muted); max-width: 44em; margin: 0 0 36px; font-size: 17px; }
+  h3 { font-size: 18px; margin: 0 0 8px; letter-spacing: -.01em; }
+
+  .grid { display: grid; gap: 16px; }
+  @media (min-width: 720px) { .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1000px) { .g4 { grid-template-columns: repeat(4, 1fr); } }
+  .grid > *, .steps > *, .hero-grid > * { min-width: 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card .tag { font: 700 12px var(--mono); letter-spacing: .08em; color: var(--accent-strong); display: block; margin-bottom: 8px; }
+
+  /* Code */
+  pre {
+    margin: 0; background: var(--code-bg); color: var(--code-text);
+    border-radius: var(--radius); padding: 18px 20px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.6; border: 1px solid #1d2b35;
+  }
+  .codeblock { position: relative; min-width: 0; }
+  .codeblock .label {
+    font: 600 12px var(--mono); color: var(--muted); margin: 0 0 8px; display: flex; justify-content: space-between;
+  }
+  .c { color: var(--code-muted); }
+  .k { color: var(--code-key); }
+  .s { color: var(--code-str); }
+  .deny { color: #fb923c; font-weight: 700; }
+  .ok { color: #5eead4; }
+  .prompt { color: var(--code-muted); user-select: none; }
+
+  .steps { counter-reset: s; display: grid; gap: 28px; }
+  .step h3::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--bg); font: 700 13px var(--mono); margin-right: 10px; vertical-align: 2px; }
+  .step p { color: var(--muted); margin: 0 0 14px; font-size: 15px; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; background: var(--bg-alt); }
+  td:first-child code { white-space: nowrap; }
+  td .status { display: inline-block; font: 600 12px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); white-space: nowrap; }
+  td .status.partial { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+  .runners { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; padding: 0; list-style: none; }
+  .runners li { font: 600 13px var(--mono); padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--surface); }
+  .runners li.no { border-style: dashed; border-color: var(--border); color: var(--muted); }
+
+  .final { text-align: center; padding: 88px 0; }
+  .final .cta-row { justify-content: center; }
+  .final p { color: var(--muted); max-width: 36em; margin: 0 auto 28px; font-size: 17px; }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: grid; gap: 24px; }
+  @media (min-width: 720px) { footer .wrap { grid-template-columns: 1.4fr 1fr 1fr; } }
+  footer h4 { color: var(--text); font-size: 14px; margin: 0 0 10px; }
+  footer ul { list-style: none; margin: 0; padding: 0; }
+  footer li { margin: 6px 0; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="favicon.svg" alt="">SkiMasque <span class="sub">connect</span></a>
+    <nav class="links" aria-label="Primary">
+      <a href="#usage">Usage</a>
+      <a href="#how">How it works</a>
+      <a href="#inputs">Inputs</a>
+      <a href="#runners">Runners</a>
+      <a href="https://skimasque-dev.github.io/skimasque/">SkiMasque</a>
+    </nav>
+    <a class="btn btn-ghost btn-sm nav-cta" href="https://github.com/skimasque-dev/connect">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">GitHub Action · skimasque-dev/connect</span>
+        <h1>One step, and the job reaches <em>only what policy allows</em>.</h1>
+        <p class="lede">
+          <code>connect</code> opens an identity-bound MASQUE tunnel for the rest of a CI job. It trades
+          the runner's OIDC token for a short-lived credential, starts a local SOCKS5 relay, and exports
+          <code>ALL_PROXY</code>. Everything after it egresses through your SkiMasque gateway, and every
+          connection is checked against policy.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#usage">Add it to a workflow →</a>
+          <a class="btn btn-ghost" href="https://github.com/skimasque-dev/connect">View on GitHub</a>
+        </div>
+      </div>
+
+      <div class="codeblock"><div class="label"><span>.github/workflows/deploy.yml</span></div><pre><span class="k">jobs</span>:
+  <span class="k">deploy</span>:
+    <span class="k">runs-on</span>: ubuntu-latest
+    <span class="k">permissions</span>:
+      <span class="k">id-token</span>: write        <span class="c"># required</span>
+      <span class="k">contents</span>: read
+    <span class="k">steps</span>:
+      - <span class="k">uses</span>: <span class="s">skimasque-dev/connect@v1</span>
+        <span class="k">with</span>:
+          <span class="k">proxy</span>: <span class="s">gateway.example.com:443</span>
+          <span class="k">audience</span>: <span class="s">https://gateway.example.com</span>
+          <span class="k">application</span>: <span class="s">terraform</span>
+
+      <span class="c"># ALL_PROXY now points at a local SOCKS5 relay.</span>
+      - <span class="k">run</span>: terraform apply -auto-approve</pre></div>
+    </div>
+  </section>
+
+  <!-- Usage -->
+  <section class="alt" id="usage">
+    <div class="wrap">
+      <p class="kicker">Usage</p>
+      <h2>Two required inputs, one permission.</h2>
+      <p class="section-intro">
+        Point <code>proxy</code> at your gateway and set <code>audience</code> to one of its
+        <code>--oidc-audience</code> values. Grant the job <code>id-token: write</code> so it can mint its
+        own token. Declaring an <code>application</code> lets policy scope rules to the tool you are running.
+        <code>@v1</code> installs the latest <code>skimasque</code> release; pin one with <code>version: vX.Y.Z</code>.
+      </p>
+      <div class="grid g3">
+        <div class="card"><span class="tag">WHO</span><h3>The job's identity</h3><p>The runner's OIDC token carries the repository, workflow, and ref. The gateway verifies it; no secret is stored in CI.</p></div>
+        <div class="card"><span class="tag">WHAT</span><h3>The application</h3><p>The <code>application</code> input is sent as <code>X-Masque-Application</code> and matched by the policy's rules.</p></div>
+        <div class="card"><span class="tag">WHERE</span><h3>Only allowed destinations</h3><p>Each connection through the relay is a request the gateway evaluates. Anything no rule allows is denied.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How -->
+  <section id="how">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2>Install, exchange, relay.</h2>
+      <p class="section-intro">
+        The action is a composite of two shell steps. The relay runs for the rest of the job and the
+        runner stops it when the job ends.
+      </p>
+      <div class="steps">
+        <div class="grid g2" style="gap:28px">
+          <div class="step">
+            <h3>Install the client</h3>
+            <p>
+              Downloads <code>skimasque-&lt;version&gt;-&lt;target&gt;.tar.gz</code> and its <code>.sha256</code>
+              from the <a href="https://github.com/skimasque-dev/skimasque/releases">skimasque release</a>,
+              verifies the checksum, and puts <code>skimasque-client</code> on <code>PATH</code>.
+              Skipped when <code>client-bin</code> is set.
+            </p>
+          </div>
+          <div class="step">
+            <h3>Open the tunnel</h3>
+            <p>
+              <code>skimasque-client --github-oidc</code> reads the runner's OIDC token, exchanges it at the
+              gateway for a credential that lasts about an hour, starts the SOCKS5 relay, and waits for it
+              to accept connections.
+            </p>
+          </div>
+        </div>
+        <div class="grid g2" style="gap:28px">
+          <div class="step">
+            <h3>Egress through the gateway</h3>
+            <p>
+              <code>ALL_PROXY=socks5h://127.0.0.1:1080</code> is written to <code>GITHUB_ENV</code>. Tools that
+              honour it (<code>terraform</code>, <code>psql</code>, <code>curl</code>, <code>git</code>, most
+              cloud SDKs) now go through the tunnel. The <code>h</code> means hostnames resolve gateway-side,
+              so DNS is subject to policy too.
+            </p>
+          </div>
+          <div class="codeblock"><div class="label"><span>Job log</span></div><pre><span class="prompt">▸ </span>Install skimasque-client
+  skimasque-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: <span class="ok">OK</span>
+<span class="prompt">▸ </span>Open the tunnel
+  tunnel up on socks5h://127.0.0.1:1080
+<span class="prompt">▸ </span>terraform apply -auto-approve
+  api.production.example.com:443   <span class="ok">allow</span>
+  registry.example.net:443         <span class="deny">DENY</span></pre></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Inputs -->
+  <section class="alt" id="inputs">
+    <div class="wrap">
+      <p class="kicker">Reference</p>
+      <h2>Inputs</h2>
+      <p class="section-intro">Everything but <code>proxy</code> and <code>audience</code> has a sensible default.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>proxy</code></td><td><span class="status">yes</span></td><td>—</td><td>Gateway address, <code>host:port</code>.</td></tr>
+            <tr><td><code>audience</code></td><td><span class="status">yes</span></td><td>—</td><td>OIDC audience; must equal one of the gateway's <code>--oidc-audience</code> values.</td></tr>
+            <tr><td><code>authority</code></td><td><span class="status partial">no</span></td><td>proxy host</td><td>TLS server name / <code>:authority</code> for the gateway.</td></tr>
+            <tr><td><code>application</code></td><td><span class="status partial">no</span></td><td>—</td><td>Application name to declare, sent as <code>X-Masque-Application</code> and matched by policy.</td></tr>
+            <tr><td><code>ca</code></td><td><span class="status partial">no</span></td><td>—</td><td>Path to a PEM the gateway's certificate chains to, for a private CA.</td></tr>
+            <tr><td><code>listen</code></td><td><span class="status partial">no</span></td><td><code>127.0.0.1:1080</code></td><td>Local address for the SOCKS5 relay.</td></tr>
+            <tr><td><code>version</code></td><td><span class="status partial">no</span></td><td>the action's ref</td><td><code>skimasque</code> release to install, e.g. <code>v0.2.0</code>. A moving ref (<code>v1</code>, <code>main</code>, a SHA) resolves to the latest release.</td></tr>
+            <tr><td><code>repository</code></td><td><span class="status partial">no</span></td><td><code>skimasque-dev/skimasque</code></td><td><code>owner/repo</code> to download the release from.</td></tr>
+            <tr><td><code>client-bin</code></td><td><span class="status partial">no</span></td><td>—</td><td>Use this <code>skimasque-client</code> binary instead of downloading a release.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Runners -->
+  <section id="runners">
+    <div class="wrap grid g2" style="gap:48px">
+      <div>
+        <p class="kicker">Supported runners</p>
+        <h2>Linux, macOS, and Windows.</h2>
+        <p class="section-intro">
+          Release binaries are built for these targets. Intel macOS is not built; pass your own binary with
+          <code>client-bin</code> if you need one.
+        </p>
+        <ul class="runners">
+          <li>linux/amd64</li>
+          <li>linux/arm64</li>
+          <li>macos/arm64</li>
+          <li>windows/amd64</li>
+          <li class="no">macos/amd64</li>
+        </ul>
+      </div>
+      <div>
+        <p class="kicker">Protocols</p>
+        <h2>TCP and UDP through one relay.</h2>
+        <p class="section-intro">
+          The relay serves SOCKS5 <code>CONNECT</code> for TCP (HTTPS, git, databases, cloud SDKs) and
+          <code>UDP ASSOCIATE</code> for DNS and other UDP. Gateways from current <code>main</code> serve TCP by
+          default; <code>v0.2.0</code> and earlier need <code>--connect-tcp</code>. This action is only the client side: the gateway,
+          the policy DSL, and the control plane live in
+          <a href="https://github.com/skimasque-dev/skimasque">skimasque-dev/skimasque</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="alt final">
+    <div class="wrap">
+      <h2>Give your next CI job one destination, not your whole network.</h2>
+      <p>Set up a gateway and a policy, then add this action to one workflow.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/skimasque-dev/skimasque/blob/main/docs/github-actions.md">Read the GitHub Actions guide</a>
+        <a class="btn btn-ghost" href="https://skimasque-dev.github.io/skimasque/">About SkiMasque</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand" href="#top"><img src="favicon.svg" alt="">SkiMasque <span class="sub">connect</span></a>
+      <p style="margin:12px 0 0">The GitHub Action for identity-aware, policy-based ephemeral networking.</p>
+      <p style="margin:8px 0 0">Licensed under MIT.</p>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="https://github.com/skimasque-dev/skimasque/blob/main/docs/getting-started.md">Getting started</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque/blob/main/docs/github-actions.md">GitHub Actions</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque/blob/main/docs/policies.md">Policies</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque/blob/main/docs/troubleshooting.md">Troubleshooting</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="https://github.com/skimasque-dev/connect">Action source</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque">SkiMasque</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque/releases">Releases</a></li>
+        <li><a href="https://github.com/skimasque-dev/skimasque/blob/main/SECURITY.md">Security policy</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
