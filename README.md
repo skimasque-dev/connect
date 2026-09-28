@@ -6,6 +6,8 @@ gateway for a short-lived credential, starts a local SOCKS5 relay, and exports
 `ALL_PROXY` so the tools that follow egress through the gateway — subject to
 policy.
 
+Project page: <https://skimasque-dev.github.io/connect/>
+
 ```yaml
 jobs:
   deploy:
@@ -14,7 +16,7 @@ jobs:
       id-token: write          # required — the action needs to mint an OIDC token
       contents: read
     steps:
-      - uses: skimasque-dev/connect@v0.3.0
+      - uses: skimasque-dev/connect@v1
         with:
           proxy: gateway.example.com:443
           audience: https://gateway.example.com
@@ -23,6 +25,9 @@ jobs:
       # ALL_PROXY now points at a local SOCKS5 relay through the gateway.
       - run: terraform apply -auto-approve
 ```
+
+`@v1` installs the latest `skimasque` release. To pin an exact client version,
+pass `version: vX.Y.Z`.
 
 ## Inputs
 
@@ -34,7 +39,7 @@ jobs:
 | `application` | no | — | Application name to declare (sent as `X-Masque-Application`, matched by policy). |
 | `ca` | no | — | Path to a PEM the gateway's certificate chains to (for a private CA). |
 | `listen` | no | `127.0.0.1:1080` | Local address for the SOCKS5 relay. |
-| `version` | no | the ref this action was called at | `skimasque` release to install (e.g. `v0.3.0`). A moving ref (`v1`, `main`, a SHA) resolves to the latest release. |
+| `version` | no | the ref this action was called at | `skimasque` release to install (e.g. `v0.2.0`). A moving ref (`v1`, `main`, a SHA) resolves to the latest release. |
 | `repository` | no | `skimasque-dev/skimasque` | `owner/repo` to download the release from. |
 | `client-bin` | no | — | Use this `skimasque-client` binary instead of downloading a release. |
 
@@ -51,8 +56,11 @@ jobs:
    `ALL_PROXY=socks5h://127.0.0.1:1080` to `GITHUB_ENV`.
 
 The relay serves both `CONNECT` (TCP — HTTPS, git, databases, cloud SDKs) and
-`UDP ASSOCIATE` (DNS and other UDP). TCP needs the gateway running with
-**`--connect-tcp`**; without it only UDP egresses.
+`UDP ASSOCIATE` (DNS and other UDP). Whether TCP egresses depends on the
+gateway: gateways built from current `main` serve TCP by default (pass
+`--no-connect-tcp` for UDP-only), while `v0.2.0` and earlier need
+**`--connect-tcp`**. Without TCP, the relay answers `CONNECT` with a SOCKS
+`command not supported` reply and only UDP egresses.
 
 `socks5h://` (with the `h`) means the destination hostname is resolved
 gateway-side, so DNS also goes through policy.
