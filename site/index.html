@@ -203,12 +203,12 @@
     <div class="wrap hero-grid">
       <div>
         <span class="eyebrow">GitHub Action · skimasque-dev/connect</span>
-        <h1>One step, and the job reaches <em>only what policy allows</em>.</h1>
+        <h1>One step gives the job <em>policy-controlled private access</em>.</h1>
         <p class="lede">
           <code>connect</code> opens an identity-bound MASQUE tunnel for the rest of a CI job. It trades
-          the runner's OIDC token for a short-lived credential, starts a local SOCKS5 relay, and exports
-          <code>ALL_PROXY</code>. Everything after it egresses through your SkiMasque gateway, and every
-          connection is checked against policy.
+          the runner's OIDC token for a renewable credential. On supported dedicated Ubuntu runners,
+          configured private TCP, UDP and DNS use the gateway, even when tools ignore proxy variables.
+          Public traffic keeps its normal route. Other runners can select explicit HTTP/SOCKS proxy mode.
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#usage">Add it to a workflow →</a>
@@ -228,8 +228,11 @@
           <span class="k">proxy</span>: <span class="s">gateway.example.com:443</span>
           <span class="k">audience</span>: <span class="s">https://gateway.example.com</span>
           <span class="k">application</span>: <span class="s">terraform</span>
+          <span class="k">routes</span>: <span class="s">10.42.0.0/16,fd42::/48</span>
+          <span class="k">dns-servers</span>: <span class="s">10.43.0.53,fd43::53</span>
+          <span class="k">dns-domains</span>: <span class="s">~internal.example</span>
 
-      <span class="c"># ALL_PROXY now points at a local SOCKS5 relay.</span>
+      <span class="c"># Private TCP/UDP sockets use the gateway.</span>
       - <span class="k">run</span>: terraform apply -auto-approve</pre></div>
     </div>
   </section>
@@ -238,12 +241,14 @@
   <section class="alt" id="usage">
     <div class="wrap">
       <p class="kicker">Usage</p>
-      <h2>Two required inputs, one permission.</h2>
+      <h2>Configure private networks once.</h2>
       <p class="section-intro">
         Point <code>proxy</code> at your gateway and set <code>audience</code> to one of its
         <code>--oidc-audience</code> values. Grant the job <code>id-token: write</code> so it can mint its
         own token. Declaring an <code>application</code> lets policy scope rules to the tool you are running.
-        <code>@v1</code> installs the latest <code>skimasque</code> release; pin one with <code>version: vX.Y.Z</code>.
+        Transparent mode additionally requires private CIDRs, DNS servers and routing domains. Include
+        both address families when services publish A and AAAA records. These examples require the
+        coordinated new client and Action release; older <code>@v1</code> tags retain their previous behavior.
       </p>
       <div class="grid g3">
         <div class="card"><span class="tag">WHO</span><h3>The job's identity</h3><p>The runner's OIDC token carries the repository, workflow, and ref. The gateway verifies it; no secret is stored in CI.</p></div>
@@ -259,8 +264,8 @@
       <p class="kicker">How it works</p>
       <h2>Install, exchange, relay.</h2>
       <p class="section-intro">
-        The action is a composite of two shell steps. The relay runs for the rest of the job and the
-        runner stops it when the job ends.
+        A Node 24 Action supervises the tunnel for the job and registers an always-running cleanup hook.
+        Startup checks capabilities, authentication, listeners, routing and DNS before reporting readiness.
       </p>
       <div class="steps">
         <div class="grid g2" style="gap:28px">
@@ -269,16 +274,16 @@
             <p>
               Downloads <code>skimasque-&lt;version&gt;-&lt;target&gt;.tar.gz</code> and its <code>.sha256</code>
               from the <a href="https://github.com/skimasque-dev/skimasque/releases">skimasque release</a>,
-              verifies the checksum, and puts <code>skimasque-client</code> on <code>PATH</code>.
-              Skipped when <code>client-bin</code> is set.
+              verifies the checksum and checks client capabilities. Transparent mode also installs a
+              embedded tun-rs TUN support and a smoltcp-based stack. One client binary; no separate adapter download.
             </p>
           </div>
           <div class="step">
             <h3>Open the tunnel</h3>
             <p>
               <code>skimasque-client --github-oidc</code> reads the runner's OIDC token, exchanges it at the
-              gateway for a credential that lasts about an hour, starts the SOCKS5 relay, and waits for it
-              to accept connections.
+              gateway for a short-lived credential and renews it during the job. Both HTTP/HTTPS and
+              SOCKS5 frontends share the authenticated session.
             </p>
           </div>
         </div>
@@ -286,19 +291,18 @@
           <div class="step">
             <h3>Egress through the gateway</h3>
             <p>
-              <code>ALL_PROXY=socks5h://127.0.0.1:1080</code> is written to <code>GITHUB_ENV</code>. Tools that
-              honour it (<code>terraform</code>, <code>psql</code>, <code>curl</code>, <code>git</code>, most
-              cloud SDKs) now go through the tunnel. The <code>h</code> means hostnames resolve gateway-side,
-              so DNS is subject to policy too.
+              Transparent mode routes configured private destinations and DNS through an owned TUN
+              link, without global proxy variables. <code>mode: proxy</code> instead exports uppercase
+              and lowercase HTTP, HTTPS, ALL and NO proxy variables for proxy-aware tools.
             </p>
           </div>
           <div class="codeblock"><div class="label"><span>Job log</span></div><pre><span class="prompt">▸ </span>Install skimasque-client
-  skimasque-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: <span class="ok">OK</span>
+  client capabilities: <span class="ok">OK</span>
 <span class="prompt">▸ </span>Open the tunnel
-  tunnel up on socks5h://127.0.0.1:1080
+  authenticated client and private routing ready
 <span class="prompt">▸ </span>terraform apply -auto-approve
   api.production.example.com:443   <span class="ok">allow</span>
-  registry.example.net:443         <span class="deny">DENY</span></pre></div>
+  ungranted private target:443     <span class="deny">DENY</span></pre></div>
         </div>
       </div>
     </div>
@@ -309,11 +313,17 @@
     <div class="wrap">
       <p class="kicker">Reference</p>
       <h2>Inputs</h2>
-      <p class="section-intro">Everything but <code>proxy</code> and <code>audience</code> has a sensible default.</p>
+      <p class="section-intro">Transparent mode needs explicit private CIDRs and DNS. See the <a href="https://github.com/skimasque-dev/connect#inputs-and-outputs">README</a> for all inputs, outputs and cleanup commands.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
+            <tr><td><code>mode</code></td><td>no</td><td>transparent</td><td>Transparent Ubuntu routing or explicit proxy mode.</td></tr>
+            <tr><td><code>routes</code></td><td>transparent</td><td>—</td><td>Private IPv4/IPv6 CIDRs; no default, local or gateway-overlapping routes.</td></tr>
+            <tr><td><code>dns-servers</code></td><td>transparent</td><td>—</td><td>Private DNS server IPs, automatically routed through the tunnel.</td></tr>
+            <tr><td><code>dns-domains</code></td><td>transparent</td><td>—</td><td>Private routing domains such as <code>~internal.example</code>; no <code>~.</code>.</td></tr>
+            <tr><td><code>http-listen</code></td><td>no</td><td>127.0.0.1:8080</td><td>Loopback HTTP and HTTPS CONNECT listener.</td></tr>
+            <tr><td><code>probe-target</code></td><td>no</td><td>—</td><td>Optional real TCP check before readiness.</td></tr>
             <tr><td><code>proxy</code></td><td><span class="status">yes</span></td><td>—</td><td>Gateway address, <code>host:port</code>.</td></tr>
             <tr><td><code>audience</code></td><td><span class="status">yes</span></td><td>—</td><td>OIDC audience; must equal one of the gateway's <code>--oidc-audience</code> values.</td></tr>
             <tr><td><code>authority</code></td><td><span class="status partial">no</span></td><td>proxy host</td><td>TLS server name / <code>:authority</code> for the gateway.</td></tr>
@@ -336,8 +346,9 @@
         <p class="kicker">Supported runners</p>
         <h2>Linux, macOS, and Windows.</h2>
         <p class="section-intro">
-          Release binaries are built for these targets. Intel macOS is not built; pass your own binary with
-          <code>client-bin</code> if you need one.
+          Transparent mode requires dedicated Ubuntu, TUN, iproute2, systemd-resolved, root or
+          passwordless sudo, and no inherited HTTP/HTTPS/ALL proxy variables. Unsupported runners
+          fail before network changes. Choose <code>mode: proxy</code> on Windows or macOS.
         </p>
         <ul class="runners">
           <li>linux/amd64</li>
@@ -351,9 +362,10 @@
         <p class="kicker">Protocols</p>
         <h2>TCP and UDP through one relay.</h2>
         <p class="section-intro">
-          The relay serves SOCKS5 <code>CONNECT</code> for TCP (HTTPS, git, databases, cloud SDKs) and
-          <code>UDP ASSOCIATE</code> for DNS and other UDP. Gateways from current <code>main</code> serve TCP by
-          default; <code>v0.2.0</code> and earlier need <code>--connect-tcp</code>. This action is only the client side: the gateway,
+          Both modes support TCP and UDP; transparent mode supports private IPv4/IPv6 and DNS over
+          either transport. ICMP is outside this interface. Transparent policy targets IP/CIDRs.
+          The post hook removes owned state; unexpected tunnel failure blocks private routes until cleanup.
+          Use ephemeral dedicated runners because forced host termination can prevent hooks. The gateway,
           the policy DSL, and the control plane live in
           <a href="https://github.com/skimasque-dev/skimasque">skimasque-dev/skimasque</a>.
         </p>

@@ -1,139 +1,65 @@
-name: "skimasque connect"
-description: >
-  Open an identity-bound MASQUE tunnel for the rest of the job. The client
-  fetches a GitHub OIDC token, exchanges it at the gateway for a short-lived
-  credential, starts a local SOCKS5 relay, and exports ALL_PROXY.
-
+name: skimasque connect
+description: Identity-bound access through a MASQUE gateway with transparent Linux routing or HTTP/SOCKS proxies.
 branding:
-  icon: "shield"
-  color: "purple"
-
+  icon: shield
+  color: purple
 inputs:
   proxy:
-    description: "Gateway address, host:port."
+    description: Gateway address, host:port.
     required: true
   audience:
-    description: >
-      OIDC audience. Must equal one of the gateway's --oidc-audience values.
+    description: OIDC audience matching a gateway --oidc-audience value.
     required: true
+  mode:
+    description: "transparent (dedicated Ubuntu with TUN and resolved) or proxy (HTTP/SOCKS-aware tools). Unsupported transparent runners fail; select proxy explicitly."
+    default: transparent
+  routes:
+    description: Comma/newline-separated private IPv4/IPv6 CIDRs. Required in transparent mode; default and local routes are rejected.
+  dns-servers:
+    description: Comma/newline-separated private DNS server IPs. Required in transparent mode and routed through the tunnel.
+  dns-domains:
+    description: "Comma/newline-separated private DNS domains, e.g. ~internal.example. Required in transparent mode. ~. is rejected."
   authority:
-    description: "TLS server name / :authority for the gateway. Defaults to the proxy host."
-    required: false
+    description: Gateway TLS server name and HTTP authority. Defaults to the original proxy hostname.
     default: ""
   application:
-    description: "Application name to declare, sent as X-Masque-Application."
-    required: false
+    description: Application context sent as X-Masque-Application.
     default: ""
   ca:
-    description: "Path to a PEM the gateway's certificate chains to."
-    required: false
+    description: Path to the gateway certificate authority PEM.
     default: ""
   listen:
-    description: "Local address for the SOCKS5 relay."
-    required: false
+    description: Loopback SOCKS5 listener address; port 0 selects a free port.
     default: "127.0.0.1:1080"
+  http-listen:
+    description: Loopback HTTP/HTTPS proxy listener address; port 0 selects a free port.
+    default: "127.0.0.1:8080"
   version:
-    description: >
-      skimasque-client release to install (e.g. v0.3.0). Defaults to the ref
-      this action was called at; a moving ref (v1, main, a SHA) resolves to the
-      latest release.
-    required: false
+    description: skimasque-client release tag. A moving ref resolves to the latest release; old clients without dual-proxy capabilities fail.
     default: ""
   repository:
-    description: "owner/repo to download the release from. Defaults to skimasque-dev/skimasque."
-    required: false
-    default: ""
+    description: Repository containing skimasque client release artifacts.
+    default: skimasque-dev/skimasque
   client-bin:
-    description: >
-      Use this skimasque-client instead of downloading a release (skips the
-      install step).
-    required: false
+    description: Use this existing client binary; capability checks still apply.
     default: ""
-
+  probe-target:
+    description: Optional host:port to verify real TCP connectivity before reporting readiness.
+    default: ""
+  startup-timeout:
+    description: Client startup timeout in seconds (1 through 300).
+    default: "30"
+outputs:
+  mode:
+    description: Selected networking mode.
+  http-proxy:
+    description: Explicit local HTTP proxy URL. Transparent mode does not export global proxy variables.
+  socks-proxy:
+    description: Explicit local SOCKS5 URL using gateway-side hostname resolution.
+  state-file:
+    description: Ownership manifest path for diagnostics and explicit early cleanup using src/stop.cjs.
 runs:
-  using: "composite"
-  steps:
-    - name: Install skimasque-client
-      if: inputs.client-bin == ''
-      shell: bash
-      env:
-        VERSION: ${{ inputs.version || github.action_ref }}
-        REPOSITORY: ${{ inputs.repository || 'skimasque-dev/skimasque' }}
-      run: |
-        set -euo pipefail
-        case "${RUNNER_OS}-${RUNNER_ARCH}" in
-          Linux-X64)    target=x86_64-unknown-linux-gnu ;;
-          Linux-ARM64)  target=aarch64-unknown-linux-gnu ;;
-          macOS-ARM64)  target=aarch64-apple-darwin ;;
-          Windows-X64)  target=x86_64-pc-windows-msvc ;;
-          # No x86_64-apple-darwin build (Intel macOS runners); pass an
-          # already-built binary via `client-bin` if you need one.
-          *) echo "::error::no skimasque-client build for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
-        esac
-
-        # A moving ref (v1, main, a commit SHA) is not a release tag -- resolve
-        # it to the latest published release.
-        if ! printf '%s' "${VERSION}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+'; then
-          VERSION="$(curl -sSfL "https://api.github.com/repos/${REPOSITORY}/releases/latest" \
-            | grep -m1 '"tag_name"' | cut -d'"' -f4)"
-        fi
-        if [ -z "${VERSION}" ]; then
-          echo "::error::no skimasque-client version to install -- pass the 'version' input"; exit 1
-        fi
-
-        base="https://github.com/${REPOSITORY}/releases/download/${VERSION}"
-        asset="skimasque-${VERSION}-${target}.tar.gz"
-        dest="${RUNNER_TEMP}/skimasque"
-        mkdir -p "${dest}"
-
-        curl -sSfL -o "${dest}/${asset}" "${base}/${asset}"
-        curl -sSfL -o "${dest}/${asset}.sha256" "${base}/${asset}.sha256"
-        ( cd "${dest}" && (sha256sum -c "${asset}.sha256" 2>/dev/null || shasum -a 256 -c "${asset}.sha256") )
-        tar xzf "${dest}/${asset}" -C "${dest}" --strip-components=1
-
-        echo "${dest}" >> "${GITHUB_PATH}"
-
-    - name: Open the tunnel
-      shell: bash
-      env:
-        PROXY: ${{ inputs.proxy }}
-        AUDIENCE: ${{ inputs.audience }}
-        AUTHORITY: ${{ inputs.authority }}
-        APPLICATION: ${{ inputs.application }}
-        CA: ${{ inputs.ca }}
-        LISTEN: ${{ inputs.listen }}
-        CLIENT_BIN: ${{ inputs.client-bin }}
-      run: |
-        set -euo pipefail
-        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-          echo "::error::no OIDC token available -- the job needs 'permissions: id-token: write'"
-          exit 1
-        fi
-
-        client="${CLIENT_BIN:-skimasque-client}"
-        args=(--proxy "${PROXY}" --github-oidc --oidc-audience "${AUDIENCE}")
-        [ -n "${AUTHORITY}" ] && args+=(--authority "${AUTHORITY}")
-        [ -n "${CA}" ] && args+=(--ca "${CA}")
-        [ -n "${APPLICATION}" ] && args+=(--app "${APPLICATION}")
-
-        nohup "${client}" "${args[@]}" socks5 --listen "${LISTEN}" \
-          > "${RUNNER_TEMP}/skimasque.log" 2>&1 &
-        echo $! > "${RUNNER_TEMP}/skimasque.pid"
-
-        host="${LISTEN%:*}"
-        port="${LISTEN##*:}"
-        for _ in $(seq 1 100); do
-          if bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null; then
-            exec 3>&- 3<&-
-            echo "ALL_PROXY=socks5h://${LISTEN}" >> "${GITHUB_ENV}"
-            echo "tunnel up on socks5h://${LISTEN}"
-            exit 0
-          fi
-          sleep 0.1
-        done
-        echo "::error::the SOCKS5 relay did not come up"
-        cat "${RUNNER_TEMP}/skimasque.log" || true
-        exit 1
-
-# The relay runs for the rest of the job; the runner terminates it when the job
-# ends. To stop it early, add a step that kills "$(cat "$RUNNER_TEMP/skimasque.pid")".
+  using: node24
+  main: src/main.cjs
+  post: src/post.cjs
+  post-if: always()

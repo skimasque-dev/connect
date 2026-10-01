@@ -3,30 +3,138 @@ name: smoke
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      client-ref:
+        description: Matching skimasque client commit or branch
+        default: main
+        type: string
 
 permissions:
   contents: read
 
+# PR and dispatch-selected source must not obtain cache-write credentials.
+cache-mode: read
+
 jobs:
-  validate:
-    runs-on: ubuntu-latest
+  portable:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate action.yml against the schema
-        run: npx --yes @action-validator/cli ./action.yml
-
-      - name: Shellcheck the composite steps
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm test
+      - name: Validate action metadata
+        if: runner.os == 'Linux'
         run: |
-          set -euo pipefail
-          python3 - <<'PY' > steps.sh
-          import yaml
-          spec = yaml.safe_load(open("action.yml"))
-          print("#!/usr/bin/env bash")
-          for i, step in enumerate(spec["runs"]["steps"]):
-              if "run" in step:
-                  print(f'# --- step {i}: {step.get("name", "")}')
-                  print(step["run"])
-          PY
-          # Advisory: the inline scripts reference runner-provided env vars.
-          shellcheck -s bash -e SC2148,SC2034 steps.sh || true
+          npm install --no-save --prefix "$RUNNER_TEMP/skm-metadata" yaml@2.8.1 ajv@8.17.1
+          curl --fail --location https://json.schemastore.org/github-action.json -o "$RUNNER_TEMP/action.schema.json"
+          node test/validate-metadata.cjs "$RUNNER_TEMP/skm-metadata/node_modules" "$RUNNER_TEMP/action.schema.json" action.yml test/post-audit/action.yml
+
+  networking:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: skimasque-dev/skimasque
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || ((github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' || github.event_name == 'push' && github.ref_name == 'feat/deployment-networking') && 'feat/deployment-networking') || 'main' }}
+          path: client-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: rustup toolchain install 1.88.0 --profile minimal
+      - name: Restore trusted Rust build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            client-source/target
+          key: native-rust-v2-${{ runner.os }}-1.88.0-${{ hashFiles('client-source/Cargo.lock') }}
+      - run: cargo +1.88.0 build --locked -p skimasque-cli
+        working-directory: client-source
+      - run: docker build -t skimasque-network-tests -f test/linux/Dockerfile .
+      - name: Verify real private networking in disposable isolated namespaces
+        run: |
+          docker run --rm --privileged \
+            -v "$PWD:/action:ro" \
+            -e SKIMASQUE_CLIENT_BIN=/action/client-source/target/debug/skimasque-client \
+            -e SKIMASQUE_SERVER_BIN=/action/client-source/target/debug/skimasque-server \
+            skimasque-network-tests node --test /action/test/linux/networking.test.cjs
+
+  action-post:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [proxy, transparent]
+        failed-workload: [false, true]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: skimasque-dev/skimasque
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || ((github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' || github.event_name == 'push' && github.ref_name == 'feat/deployment-networking') && 'feat/deployment-networking') || 'main' }}
+          path: client-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: cargo build --locked -p skimasque-cli
+        working-directory: client-source
+      - name: Start isolated private services and real OIDC gateway
+        env:
+          SKIMASQUE_SERVER_BIN: ${{ github.workspace }}/client-source/target/debug/skimasque-server
+        run: bash test/post-audit/fixture.sh
+      # Register first: GitHub runs post hooks in reverse registration order.
+      - uses: ./test/post-audit
+      - uses: ./
+        id: network
+        with:
+          mode: ${{ matrix.mode }}
+          proxy: 192.0.2.1:4433
+          authority: localhost:4433
+          audience: skimasque-action-ci
+          ca: ${{ runner.temp }}/skm-post-audit/ca.pem
+          client-bin: ${{ github.workspace }}/client-source/target/debug/skimasque-client
+          http-listen: 127.0.0.1:0
+          listen: 127.0.0.1:0
+          routes: 10.42.0.0/24,fd42::/64
+          dns-servers: 10.43.0.53,fd43::53
+          dns-domains: ~internal.test
+          probe-target: 10.42.0.10:18080
+      - name: Give post audit the ownership manifest
+        if: always()
+        env:
+          STATE_FILE: ${{ steps.network.outputs.state-file }}
+        run: printf '%s' "$STATE_FILE" > "$RUNNER_TEMP/skm-post-audit/manifest-path"
+      - name: Exercise successful and intentionally failed deployment steps
+        id: workload
+        continue-on-error: ${{ matrix.failed-workload }}
+        env:
+          NETWORK_MODE: ${{ matrix.mode }}
+          EXPECT_FAILURE: ${{ matrix.failed-workload }}
+        run: |
+          if [[ "$NETWORK_MODE" == proxy ]]; then
+            curl --fail --noproxy '' http://10.42.0.10:18081/
+          else
+            curl --fail --noproxy '*' http://10.42.0.10:18081/
+            node -e 'require("node:dns").lookup("db.internal.test",{all:true},(e,a)=>{if(e)throw e;if(!a.some(x=>x.address==="fd42::10"))throw Error("missing AAAA");console.log(a)})'
+          fi
+          if [[ "$EXPECT_FAILURE" == true ]]; then exit 1; fi
+      - name: Check the expected workload outcome
+        if: always()
+        env:
+          EXPECT_FAILURE: ${{ matrix.failed-workload }}
+          OUTCOME: ${{ steps.workload.outcome }}
+        run: |
+          if [[ "$EXPECT_FAILURE" == true ]]; then test "$OUTCOME" == failure
+          else test "$OUTCOME" == success; fi
