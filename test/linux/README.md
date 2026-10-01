@@ -36,3 +36,9 @@ after the Action's post. That job requires `id-token: write` and is skipped for
 fork pull requests. Cross-repository CI uses `vars.SKIMASQUE_CLIENT_REF` (default
 `main`) or the manual `client-ref` input; point it at the matching client commit
 until that branch lands. Publishing either repository is a separate operation.
+
+Smoke jobs restore Rust caches with read-only cache tokens. A separate workflow
+populates the cache on pushes to `main`, building the fixed client `main` ref.
+PRs and manual client-ref runs can reuse it without writing shared cache entries.
+The cache uses a new namespace to avoid consuming entries from the old policy;
+it becomes warm after the first successful trusted build.

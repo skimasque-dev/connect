@@ -1,0 +1,31 @@
+name: Warm trusted Rust cache
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Only reviewed main code and the fixed upstream main ref populate this cache.
+cache-mode: write
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: skimasque-dev/skimasque
+          ref: main
+          path: client-source
+      - run: rustup toolchain install 1.88.0 --profile minimal
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            client-source/target
+          key: native-rust-v2-${{ runner.os }}-1.88.0-${{ hashFiles('client-source/Cargo.lock') }}
+      - run: cargo +1.88.0 build --locked -p skimasque-cli
+        working-directory: client-source

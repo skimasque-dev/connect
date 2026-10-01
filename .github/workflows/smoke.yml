@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+# PR and dispatch-selected source must not obtain cache-write credentials.
+cache-mode: read
+
 jobs:
   portable:
     strategy:
@@ -45,6 +48,14 @@ jobs:
         with:
           node-version: "24"
       - run: rustup toolchain install 1.88.0 --profile minimal
+      - name: Restore trusted Rust build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            client-source/target
+          key: native-rust-v2-${{ runner.os }}-1.88.0-${{ hashFiles('client-source/Cargo.lock') }}
       - run: cargo +1.88.0 build --locked -p skimasque-cli
         working-directory: client-source
       - run: docker build -t skimasque-network-tests -f test/linux/Dockerfile .
