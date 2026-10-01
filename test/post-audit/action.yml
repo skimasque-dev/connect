@@ -1,0 +1,7 @@
+name: Verify Skimasque post cleanup
+description: Registers an audit before the connect Action so it runs after cleanup.
+runs:
+  using: node24
+  main: register.cjs
+  post: verify.cjs
+  post-if: always()

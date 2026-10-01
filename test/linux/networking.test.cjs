@@ -1,0 +1,229 @@
+"use strict";
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const net = require("node:net");
+const dns = require("node:dns/promises");
+const { setTimeout: delay } = require("node:timers/promises");
+const { run } = require("../../src/command.cjs");
+const { start } = require("../../src/main.cjs");
+const { stop } = require("../../src/stop.cjs");
+const { readManifest } = require("../../src/manifest.cjs");
+
+async function echo(host, port, payload = "hello") {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host, port });
+    let body = "";
+    socket.setTimeout(5000);
+    socket.once("connect", () => socket.write(payload));
+    socket.on("data", (data) => {
+      body += data;
+      socket.destroy();
+      resolve(body);
+    });
+    socket.once("error", reject);
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error("TCP echo timed out"));
+    });
+  });
+}
+async function tcpDns(host) {
+  const query = Buffer.concat([
+    Buffer.from("123401000001000000000000", "hex"),
+    Buffer.from("\x02db\x08internal\x04test\x00", "binary"),
+    Buffer.from("00010001", "hex"),
+  ]);
+  const length = Buffer.alloc(2);
+  length.writeUInt16BE(query.length);
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(53, host);
+    let reply = Buffer.alloc(0);
+    socket.setTimeout(5000);
+    socket.once("connect", () => socket.write(Buffer.concat([length, query])));
+    socket.on("data", (data) => {
+      reply = Buffer.concat([reply, data]);
+      if (reply.length >= 2 && reply.length >= reply.readUInt16BE(0) + 2) {
+        socket.destroy();
+        resolve(reply);
+      }
+    });
+    socket.once("error", reject);
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error("TCP DNS timed out"));
+    });
+  });
+}
+if (process.env.SKIMASQUE_TEST_INSIDE !== "1") {
+  test("privileged networking suite runs in isolated mount network and PID namespaces", async () => {
+    assert.equal(process.platform, "linux");
+    assert.equal(process.getuid(), 0, "run with sudo in CI");
+    for (const name of [
+      "SKIMASQUE_CLIENT_BIN",
+      "SKIMASQUE_SERVER_BIN",
+      "SKIMASQUE_ADAPTER_BIN",
+    ])
+      assert.ok(process.env[name], `${name} is required`);
+    const result = await run("bash", [path.join(__dirname, "fixture.sh")], {
+      timeout: 180000,
+    });
+    assert.match(result.stdout, /pass/);
+    console.log(result.stdout);
+  });
+} else {
+  test("raw TCP UDP private DNS IPv6 split routes and failure cleanup work through real MASQUE", async (t) => {
+    for (const name of [
+      "HTTP_PROXY",
+      "http_proxy",
+      "HTTPS_PROXY",
+      "https_proxy",
+      "ALL_PROXY",
+      "all_proxy",
+    ])
+      delete process.env[name];
+    const dir = process.env.SKIMASQUE_CASE_DIR;
+    assert.notEqual(
+      process.getuid(),
+      0,
+      "client and adapter must run without root",
+    );
+    const config = {
+      mode: "transparent",
+      runnerTemp: dir,
+      platform: "linux",
+      arch: process.arch,
+      proxy: "192.0.2.1:4433",
+      authority: "localhost:4433",
+      ca: path.join(dir, "ca.pem"),
+      audience: "test",
+      application: "integration",
+      githubOidc: false,
+      routes: ["10.42.0.0/24", "fd42::/64"],
+      dnsServers: ["10.43.0.53", "fd43::53"],
+      dnsDomains: ["~internal.test"],
+      clientBin: process.env.SKIMASQUE_CLIENT_BIN,
+      adapterBin: process.env.SKIMASQUE_ADAPTER_BIN,
+      httpListen: "127.0.0.1:0",
+      socksListen: "127.0.0.1:0",
+      startupTimeout: 15000,
+      probeTarget: "10.42.0.10:18080",
+    };
+    const before4 = JSON.parse(
+      (await run("ip", ["-j", "-4", "rule", "show"])).stdout,
+    );
+    const before6 = JSON.parse(
+      (await run("ip", ["-j", "-6", "rule", "show"])).stdout,
+    );
+    await assert.rejects(echo("10.42.0.10", 18080));
+    assert.equal(await echo("198.51.100.10", 18081), "public:hello");
+    let instance;
+    try {
+      instance = await start(config);
+    } catch (error) {
+      for (const name of await fs.readdir(dir)) {
+        if (name.startsWith("skimasque-")) {
+          for (const log of ["supervisor.log", "client.log", "adapter.log"]) {
+            const file = path.join(dir, name, log);
+            console.error(log, await fs.readFile(file, "utf8").catch(() => ""));
+          }
+        }
+      }
+      throw error;
+    }
+    t.after(() => stop(instance.manifestPath));
+    assert.equal(await echo("10.42.0.10", 18080), "echo:hello");
+    assert.equal(await echo("fd42::10", 18080), "echo:hello");
+    const addresses = await dns.lookup("db.internal.test", { all: true });
+    assert.ok(addresses.some((a) => a.address === "10.42.0.10"));
+    assert.ok(addresses.some((a) => a.address === "fd42::10"));
+    assert.equal(await echo("db.internal.test", 18080), "echo:hello");
+    const resolver = new dns.Resolver();
+    resolver.setServers(["10.43.0.53"]);
+    assert.deepEqual(await resolver.resolve4("db.internal.test"), [
+      "10.42.0.10",
+    ]);
+    for (const host of ["10.43.0.53", "fd43::53"])
+      assert.deepEqual(
+        (await tcpDns(host)).subarray(-4),
+        Buffer.from([10, 42, 0, 10]),
+      );
+    assert.equal(await echo("198.51.100.10", 18081), "public:hello");
+    await assert.rejects(echo("10.42.0.10", 18082));
+    assert.ok(!process.env.HTTP_PROXY && !process.env.ALL_PROXY);
+    // A usable underlying route must remain blocked when the adapter dies.
+    await run("sudo", [
+      "-n",
+      "ip",
+      "route",
+      "add",
+      "10.42.0.0/24",
+      "via",
+      "192.0.2.1",
+    ]);
+    const state = await readManifest(instance.manifestPath);
+    process.kill(state.processes.adapter.pid, "SIGKILL");
+    for (
+      let i = 0;
+      i < 100 && (await readManifest(instance.manifestPath)).phase !== "failed";
+      i++
+    )
+      await delay(50);
+    assert.equal((await readManifest(instance.manifestPath)).phase, "failed");
+    await assert.rejects(echo("10.42.0.10", 18080));
+    assert.equal(await echo("198.51.100.10", 18081), "public:hello");
+    await run(process.execPath, [path.join(__dirname, "../../src/post.cjs")], {
+      env: { ...process.env, STATE_manifest: instance.manifestPath },
+    });
+    await stop(instance.manifestPath);
+    assert.deepEqual(
+      JSON.parse((await run("ip", ["-j", "-4", "rule", "show"])).stdout),
+      before4,
+    );
+    assert.deepEqual(
+      JSON.parse((await run("ip", ["-j", "-6", "rule", "show"])).stdout),
+      before6,
+    );
+    assert.ok(
+      !JSON.parse((await run("ip", ["-j", "link", "show"])).stdout).some((l) =>
+        l.ifname.startsWith("skm"),
+      ),
+    );
+    // Cleanup restores direct routing only at the end of the access scope.
+    assert.equal(await echo("10.42.0.10", 18080), "echo:hello");
+    await run("sudo", [
+      "-n",
+      "ip",
+      "route",
+      "del",
+      "10.42.0.0/24",
+      "via",
+      "192.0.2.1",
+    ]);
+    const second = await start(config);
+    t.after(() => stop(second.manifestPath));
+    assert.equal(await echo("10.42.0.10", 18080), "echo:hello");
+    process.kill(
+      (await readManifest(second.manifestPath)).processes.client.pid,
+      "SIGKILL",
+    );
+    for (
+      let i = 0;
+      i < 100 && (await readManifest(second.manifestPath)).phase !== "failed";
+      i++
+    )
+      await delay(50);
+    assert.equal((await readManifest(second.manifestPath)).phase, "failed");
+    await assert.rejects(echo("10.42.0.10", 18080));
+    await stop(second.manifestPath);
+    assert.deepEqual(
+      JSON.parse((await run("ip", ["-j", "-4", "rule", "show"])).stdout),
+      before4,
+    );
+    assert.deepEqual(
+      JSON.parse((await run("ip", ["-j", "-6", "rule", "show"])).stdout),
+      before6,
+    );
+  });
+}
