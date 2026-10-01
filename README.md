@@ -1,14 +1,14 @@
 # skimasque-dev/connect
 
 Give a GitHub Actions job identity-bound access to private services through a
-Skimasque MASQUE gateway. The client exchanges GitHub OIDC for a short-lived
+SkiMasque MASQUE gateway. The client exchanges GitHub OIDC for a short-lived
 credential and renews it while the job runs. Policy controls each TCP/UDP tunnel.
 
-**Release coordination:** this branch requires the matching client changes.
-Existing releases without `proxy-ready-v1` fail capability checks. Publish the
-client first, then release the Action. Until then use `client-bin` built from the
-matching client branch. Examples describe the new interface; previously
-published `@v1` tags retain their previous behavior.
+**Release compatibility:** main contains the transparent/proxy interface and native
+TUN client integration. Use coordinated Action/client releases: proxy mode requires
+`proxy-ready-v1` and transparent mode also requires `proxy-tun-v1`. Merging to main
+does not move an existing `@v1` tag. Pin compatible releases or use `client-bin`
+from the matching implementation; capability checks reject older clients.
 
 ## Transparent access (default)
 

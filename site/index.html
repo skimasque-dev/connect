@@ -245,7 +245,7 @@
       <p class="section-intro">
         Point <code>proxy</code> at your gateway and set <code>audience</code> to one of its
         <code>--oidc-audience</code> values. Grant the job <code>id-token: write</code> so it can mint its
-        own token. Declaring an <code>application</code> lets policy scope rules to the tool you are running.
+        own token. The declared <code>application</code> is context matched by policy, not verified proof of the running program.
         Transparent mode additionally requires private CIDRs, DNS servers and routing domains. Include
         both address families when services publish A and AAAA records. These examples require the
         coordinated new client and Action release; older <code>@v1</code> tags retain their previous behavior.
@@ -274,8 +274,8 @@
             <p>
               Downloads <code>skimasque-&lt;version&gt;-&lt;target&gt;.tar.gz</code> and its <code>.sha256</code>
               from the <a href="https://github.com/skimasque-dev/skimasque/releases">skimasque release</a>,
-              verifies the checksum and checks client capabilities. Transparent mode also installs a
-              embedded tun-rs TUN support and a smoltcp-based stack. One client binary; no separate adapter download.
+              verifies the checksum and checks client capabilities. The client embeds
+              tun-rs TUN support and a smoltcp-based stack. One client binary; no separate adapter download.
             </p>
           </div>
           <div class="step">
@@ -366,7 +366,7 @@
           either transport. ICMP is outside this interface. Transparent policy targets IP/CIDRs.
           The post hook removes owned state; unexpected tunnel failure blocks private routes until cleanup.
           Use ephemeral dedicated runners because forced host termination can prevent hooks. The gateway,
-          the policy DSL, and the control plane live in
+          and the policy DSL live in
           <a href="https://github.com/skimasque-dev/skimasque">skimasque-dev/skimasque</a>.
         </p>
       </div>
@@ -377,7 +377,7 @@
   <section class="alt final">
     <div class="wrap">
       <h2>Give your next CI job one destination, not your whole network.</h2>
-      <p>Set up a gateway and a policy, then add this action to one workflow.</p>
+      <p>Choose a reachable Cloud gateway or deploy a customer gateway in your network, publish a policy, then configure one workflow.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/skimasque-dev/skimasque/blob/main/docs/github-actions.md">Read the GitHub Actions guide</a>
         <a class="btn btn-ghost" href="https://skimasque-dev.github.io/skimasque/">About SkiMasque</a>
