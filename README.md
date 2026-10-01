@@ -7,8 +7,22 @@ credential and renews it while the job runs. Policy controls each TCP/UDP tunnel
 **Release compatibility:** main contains the transparent/proxy interface and native
 TUN client integration. Use coordinated Action/client releases: proxy mode requires
 `proxy-ready-v1` and transparent mode also requires `proxy-tun-v1`. Merging to main
-does not move an existing `@v1` tag. Pin compatible releases or use `client-bin`
+does not move an existing release tag. `@v1` retains the legacy SOCKS-only
+interface; current examples target `@v2`. Pin compatible releases or use `client-bin`
 from the matching implementation; capability checks reject older clients.
+
+## Migrating from v1
+
+Use `skimasque-dev/connect@v2` for the current interface. For proxy-aware tools,
+set `mode: proxy` explicitly. Transparent mode is the default and requires private
+routes, DNS servers and DNS domains on a supported dedicated Ubuntu runner.
+The runtime now requires Node 24-compatible runners, and the Action owns post-job
+cleanup. Keep `@v1` only when intentionally using the legacy SOCKS-only interface.
+
+Action and client versions are independent. With an exact Action tag such as
+`@v2.0.0`, set `with.version` to a compatible **skimasque client** release;
+otherwise the installer interprets the Action's exact tag as the client version.
+The moving `@v2` tag resolves to the latest client release when no version is set.
 
 ## Transparent access (default)
 
@@ -24,7 +38,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: skimasque-dev/connect@v1 # use the coordinated new release
+      - uses: skimasque-dev/connect@v2 # requires a compatible client release
         with:
           proxy: gateway.example.com:443
           audience: https://gateway.example.com
@@ -65,7 +79,7 @@ It requires no elevated privileges. HTTP and HTTPS CONNECT use the HTTP
 listener; SOCKS clients can use TCP CONNECT and UDP ASSOCIATE.
 
 ```yaml
-- uses: skimasque-dev/connect@v1 # use the coordinated new release
+- uses: skimasque-dev/connect@v2 # requires a compatible client release
   with:
     mode: proxy
     proxy: gateway.example.com:443
@@ -130,9 +144,9 @@ For early cleanup, check out the same Action source and use `state-file`:
 - uses: actions/checkout@v4
   with:
     repository: skimasque-dev/connect
-    ref: v1 # same coordinated release as the Action
+    ref: v2 # same major release as the Action
     path: .connect-action
-- uses: skimasque-dev/connect@v1
+- uses: skimasque-dev/connect@v2
   id: network
   with:
     mode: proxy

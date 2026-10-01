@@ -223,7 +223,7 @@
       <span class="k">id-token</span>: write        <span class="c"># required</span>
       <span class="k">contents</span>: read
     <span class="k">steps</span>:
-      - <span class="k">uses</span>: <span class="s">skimasque-dev/connect@v1</span>
+      - <span class="k">uses</span>: <span class="s">skimasque-dev/connect@v2</span>
         <span class="k">with</span>:
           <span class="k">proxy</span>: <span class="s">gateway.example.com:443</span>
           <span class="k">audience</span>: <span class="s">https://gateway.example.com</span>
@@ -330,7 +330,7 @@
             <tr><td><code>application</code></td><td><span class="status partial">no</span></td><td>—</td><td>Application name to declare, sent as <code>X-Masque-Application</code> and matched by policy.</td></tr>
             <tr><td><code>ca</code></td><td><span class="status partial">no</span></td><td>—</td><td>Path to a PEM the gateway's certificate chains to, for a private CA.</td></tr>
             <tr><td><code>listen</code></td><td><span class="status partial">no</span></td><td><code>127.0.0.1:1080</code></td><td>Local address for the SOCKS5 relay.</td></tr>
-            <tr><td><code>version</code></td><td><span class="status partial">no</span></td><td>the action's ref</td><td><code>skimasque</code> release to install, e.g. <code>v0.2.0</code>. A moving ref (<code>v1</code>, <code>main</code>, a SHA) resolves to the latest release.</td></tr>
+            <tr><td><code>version</code></td><td><span class="status partial">no</span></td><td>the action's ref</td><td><code>skimasque</code> release to install, e.g. <code>v0.2.0</code>. A moving ref (<code>v2</code>, <code>main</code>, a SHA) resolves to the latest release.</td></tr>
             <tr><td><code>repository</code></td><td><span class="status partial">no</span></td><td><code>skimasque-dev/skimasque</code></td><td><code>owner/repo</code> to download the release from.</td></tr>
             <tr><td><code>client-bin</code></td><td><span class="status partial">no</span></td><td>—</td><td>Use this <code>skimasque-client</code> binary instead of downloading a release.</td></tr>
           </tbody>
