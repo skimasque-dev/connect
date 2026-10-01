@@ -45,8 +45,19 @@ async function start(config, deps = {}) {
     );
     if (config.mode === "proxy") {
       state.proxyLock = path.join(config.runnerTemp, "skimasque-proxy-active");
+      const ownerFile = path.join(dir, "proxy-lock-owner");
+      const owner = await fs.open(ownerFile, "wx", 0o600);
       try {
-        await fs.mkdir(state.proxyLock, { mode: 0o700 });
+        await owner.writeFile(manifestPath);
+        await owner.sync();
+      } finally {
+        await owner.close();
+      }
+      // Journal ownership before atomically linking the already-complete owner
+      // record into the singleton name. There is never an ownerless lock.
+      await saveManifest(manifestPath, state);
+      try {
+        await fs.link(ownerFile, state.proxyLock);
       } catch (error) {
         if (error.code === "EEXIST")
           throw new Error(
@@ -54,10 +65,9 @@ async function start(config, deps = {}) {
           );
         throw error;
       }
-      await fs.writeFile(path.join(state.proxyLock, "owner"), manifestPath, {
-        flag: "wx",
-        mode: 0o600,
-      });
+      state.proxyLockAcquired = true;
+      await saveManifest(manifestPath, state);
+      if (deps.proxyLockCreated) await deps.proxyLockCreated();
       state.previousProxy = Object.fromEntries(
         Object.keys(proxyEnvironment("", "")).map((name) => [
           name,

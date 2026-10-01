@@ -80,6 +80,25 @@ test("unsupported transparent mode rejects before downloading or exporting varia
 });
 module.exports = { commands };
 
+test("a failure immediately after proxy lock creation releases only its owned lock", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    start(f.config, {
+      env: f.env,
+      proxyLockCreated: async () => {
+        throw new Error("interrupted lock creation");
+      },
+    }),
+    /interrupted/,
+  );
+  await assert.rejects(
+    fs.access(path.join(f.config.runnerTemp, "skimasque-proxy-active")),
+    { code: "ENOENT" },
+  );
+  const instance = await start(f.config, { env: f.env });
+  await stop(instance.manifestPath);
+});
+
 test("per-instance stop wrapper provides early cleanup", async (t) => {
   const f = await fixture(t);
   const instance = await start(f.config, { env: f.env });

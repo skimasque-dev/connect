@@ -37,7 +37,7 @@ jobs:
 ```
 
 Transparent mode requires Ubuntu Linux, `/dev/net/tun`, `ip`, `unzip`, a working
-systemd-resolved stub at `127.0.0.53`, and root or passwordless sudo. Use a current
+systemd-resolved stub at `127.0.0.53`, `flock` (util-linux), and root or passwordless sudo. Use a current
 GitHub runner supporting Node 24, at least
 [v2.327.1](https://github.com/actions/checkout#checkout-v5). IPv6 must be enabled
 for IPv6 routes or DNS.

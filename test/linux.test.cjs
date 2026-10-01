@@ -316,6 +316,22 @@ test("failed rule cleanup retains terminal defaults so remaining private rules c
 });
 module.exports = { Kernel, fixture };
 
+test("failure blocking refuses to replace a foreign route", async (t) => {
+  const f = await fixture(t);
+  await setupNetwork(f.manifest, f.config, f.deps);
+  const route = f.kernel.routes.find((r) => r.dst === "10.42.0.0/16");
+  route.protocol = 99;
+  route.dev = "foreign";
+  const foreign = { ...route };
+  await assert.rejects(blockNetwork(f.manifest, f.deps), /ownership/);
+  assert.deepEqual(route, foreign);
+  assert.ok(
+    f.kernel.routes.some(
+      (r) => r.dst === "default" && r.type === "unreachable",
+    ),
+  );
+});
+
 test("interrupted failure blocking remains safely cleanable", async (t) => {
   const f = await fixture(t);
   await setupNetwork(f.manifest, f.config, f.deps);

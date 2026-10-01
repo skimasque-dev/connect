@@ -2,6 +2,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { setTimeout: delay } = require("node:timers/promises");
 async function createManifest(directory, config) {
   const id = randomUUID(),
     dir = path.join(directory, `skimasque-${id}`);
@@ -30,7 +31,20 @@ async function saveManifest(file, state) {
     await handle.close();
   }
   try {
-    await fs.rename(temp, file);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.rename(temp, file);
+        break;
+      } catch (error) {
+        if (
+          process.platform !== "win32" ||
+          !["EPERM", "EBUSY", "EACCES"].includes(error.code) ||
+          attempt === 9
+        )
+          throw error;
+        await delay(20);
+      }
+    }
     if (process.platform !== "win32") {
       const directory = await fs.open(path.dirname(file), "r");
       try {

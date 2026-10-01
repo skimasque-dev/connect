@@ -7,7 +7,7 @@ const { spawn } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
 const { readManifest, saveManifest } = require("./manifest.cjs");
-const { identify, alive } = require("./process.cjs");
+const { identify, alive, terminateOwned } = require("./process.cjs");
 const { loopbackEndpoint } = require("./config.cjs");
 const {
   setupNetwork,
@@ -87,7 +87,10 @@ async function readReady(file, child, config, timeoutMs) {
       throw new Error("Client exited before readiness");
     try {
       const value = JSON.parse(await fs.readFile(file, "utf8"));
-      if (value.schema !== 1 || value.pid !== child.pid)
+      if (
+        value.schema !== 1 ||
+        value.pid !== (child.actualRecord?.pid || child.pid)
+      )
         throw new Error("Client ready record has wrong process identity");
       if (value.gateway !== config.pinnedGateway)
         throw new Error(
@@ -180,11 +183,12 @@ async function worker(manifestPath) {
   const stopChild = async (child) => {
     if (child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise((resolve) => child.once("exit", resolve));
-    child.kill("SIGTERM");
-    await Promise.race([exited, delay(2000)]);
+    child.stdin.end(); // owned launcher observes EOF and terminates its child
+    await Promise.race([exited, delay(6000, undefined, { ref: false })]);
     if (child.exitCode === null && child.signalCode === null) {
+      if (child.actualRecord) await terminateOwned(child.actualRecord);
       child.kill("SIGKILL");
-      await Promise.race([exited, delay(2000)]);
+      await Promise.race([exited, delay(2000, undefined, { ref: false })]);
     }
     if (child.exitCode === null && child.signalCode === null)
       throw new Error("Child process did not stop");
@@ -277,19 +281,53 @@ async function worker(manifestPath) {
   process.on("SIGINT", handleSignal);
   const spawnChild = async (name, binary, args) => {
     if (stopping) throw new Error("Startup stopped");
+    const receipt = path.join(dir, `${name}-process.json`),
+      launchConfig = path.join(dir, `${name}-launch.json`);
+    await fs.writeFile(
+      launchConfig,
+      JSON.stringify({ binary, args, receipt }),
+      { flag: "wx", mode: 0o600 },
+    );
+    state.receipts ??= {};
+    state.receipts[name] = receipt;
+    await persist();
     const log = syncFs.openSync(path.join(dir, `${name}.log`), "a", 0o600);
-    const child = spawn(binary, args, {
-      windowsHide: true,
-      shell: false,
-      stdio: ["ignore", log, log],
-    });
+    const child = spawn(
+      process.execPath,
+      [path.join(__dirname, "child-launcher.cjs"), launchConfig],
+      {
+        windowsHide: true,
+        shell: false,
+        stdio: ["pipe", log, log],
+      },
+    );
     syncFs.closeSync(log);
     children.push(child);
     await new Promise((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    state.processes[name] = await identify(child.pid);
+    child.stdin.on("error", () => {});
+    state.processes[`${name}Launcher`] = await identify(child.pid);
+    await persist();
+    if (stopping) throw new Error("Startup stopped");
+    child.stdin.write("start\n");
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`${name} exited before process receipt`);
+      try {
+        child.actualRecord = JSON.parse(await fs.readFile(receipt, "utf8"));
+        break;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      await delay(25);
+    }
+    if (!child.actualRecord || !(await alive(child.actualRecord)))
+      throw new Error(`${name} did not publish a valid process receipt`);
+    if (config.childJournalDelayMs) await delay(config.childJournalDelayMs);
+    state.processes[name] = child.actualRecord;
     await persist();
     child.on("error", (error) => console.error(`${name}: ${error.message}`));
     return child;

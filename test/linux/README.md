@@ -22,12 +22,17 @@ Coverage includes raw private TCP with both families, private DNS outside the
 configured CIDRs, hostname A/AAAA resolution, UDP DNS, TCP DNS, policy refusal,
 unchanged public routes, adapter failure with a usable underlying private route,
 idempotent explicit cleanup and the same post entrypoint used by GitHub Actions.
-Portable tests additionally inject failures after every network mutation,
+Portable tests additionally inject failures before every network mutation,
 preserve unrelated state, reject foreign ownership, verify concurrent resources,
 validate process creation identity and restore all proxy variables.
 
+The real namespace suite also SIGKILLs setup after an actual TUN mutation and
+verifies saved-manifest post recovery. A kernel-held host lock releases on
+process death; a clean helper finishes any current mutation before release.
+
 The workflow also runs the actual Action and its registered post hook with
-GitHub OIDC in proxy mode. A separate post audit registers first so it runs
+GitHub OIDC in both modes, with successful and intentionally failed workloads.
+A separate post audit registers first so it runs
 after the Action's post. That job requires `id-token: write` and is skipped for
 fork pull requests. Cross-repository CI uses `vars.SKIMASQUE_CLIENT_REF` (default
 `main`) or the manual `client-ref` input; point it at the matching client commit

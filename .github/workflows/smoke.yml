@@ -70,6 +70,11 @@ jobs:
   action-post:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [proxy, transparent]
+        failed-workload: [false, true]
     permissions:
       contents: read
       id-token: write
@@ -85,38 +90,51 @@ jobs:
           node-version: "24"
       - run: cargo build --locked -p skimasque-cli
         working-directory: client-source
-      - name: Start local OIDC gateway and HTTP origin
-        run: |
-          mkdir -p "$RUNNER_TEMP/skm-post-audit"
-          client-source/target/debug/skimasque-server \
-            --listen 127.0.0.1:4433 --authority localhost:4433 \
-            --self-signed-name localhost --write-cert "$RUNNER_TEMP/skm-post-audit/ca.pem" \
-            --oidc --oidc-audience skimasque-action-ci --allow-private \
-            > "$RUNNER_TEMP/skm-post-audit/gateway.log" 2>&1 &
-          python3 -m http.server 18080 --bind 127.0.0.1 > "$RUNNER_TEMP/skm-post-audit/origin.log" 2>&1 &
-          for i in $(seq 1 100); do
-            test -s "$RUNNER_TEMP/skm-post-audit/ca.pem" && break
-            sleep 0.1
-          done
-          test -s "$RUNNER_TEMP/skm-post-audit/ca.pem"
+      - name: Start isolated private services and real OIDC gateway
+        env:
+          SKIMASQUE_SERVER_BIN: ${{ github.workspace }}/client-source/target/debug/skimasque-server
+        run: bash test/post-audit/fixture.sh
       # Register first: GitHub runs post hooks in reverse registration order.
       - uses: ./test/post-audit
       - uses: ./
         id: network
         with:
-          mode: proxy
-          proxy: 127.0.0.1:4433
+          mode: ${{ matrix.mode }}
+          proxy: 192.0.2.1:4433
           authority: localhost:4433
           audience: skimasque-action-ci
           ca: ${{ runner.temp }}/skm-post-audit/ca.pem
           client-bin: ${{ github.workspace }}/client-source/target/debug/skimasque-client
           http-listen: 127.0.0.1:0
           listen: 127.0.0.1:0
-          probe-target: 127.0.0.1:18080
-      - name: Verify ordinary HTTP through exported proxy
-        run: curl --fail --noproxy '' http://127.0.0.1:18080/
+          routes: 10.42.0.0/24,fd42::/64
+          dns-servers: 10.43.0.53,fd43::53
+          dns-domains: ~internal.test
+          probe-target: 10.42.0.10:18080
       - name: Give post audit the ownership manifest
         if: always()
         env:
           STATE_FILE: ${{ steps.network.outputs.state-file }}
         run: printf '%s' "$STATE_FILE" > "$RUNNER_TEMP/skm-post-audit/manifest-path"
+      - name: Exercise successful and intentionally failed deployment steps
+        id: workload
+        continue-on-error: ${{ matrix.failed-workload }}
+        env:
+          NETWORK_MODE: ${{ matrix.mode }}
+          EXPECT_FAILURE: ${{ matrix.failed-workload }}
+        run: |
+          if [[ "$NETWORK_MODE" == proxy ]]; then
+            curl --fail --noproxy '' http://10.42.0.10:18081/
+          else
+            curl --fail --noproxy '*' http://10.42.0.10:18081/
+            node -e 'require("node:dns").lookup("db.internal.test",{all:true},(e,a)=>{if(e)throw e;if(!a.some(x=>x.address==="fd42::10"))throw Error("missing AAAA");console.log(a)})'
+          fi
+          if [[ "$EXPECT_FAILURE" == true ]]; then exit 1; fi
+      - name: Check the expected workload outcome
+        if: always()
+        env:
+          EXPECT_FAILURE: ${{ matrix.failed-workload }}
+          OUTCOME: ${{ steps.workload.outcome }}
+        run: |
+          if [[ "$EXPECT_FAILURE" == true ]]; then test "$OUTCOME" == failure
+          else test "$OUTCOME" == success; fi

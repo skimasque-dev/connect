@@ -5,6 +5,7 @@ const { setTimeout: delay } = require("node:timers/promises");
 const { run } = require("./command.cjs");
 const { readManifest, saveManifest } = require("./manifest.cjs");
 const { parseIp, parseCidr } = require("./ip.cjs");
+const { acquireLock } = require("./network-lock.cjs");
 
 const SAFE_ENV = {
   PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
@@ -14,17 +15,40 @@ const SAFE_ENV = {
 const PROTOCOL = 242,
   LOCK = "/run/lock/skimasque-connect.lock";
 function command(deps, elevation) {
-  return (program, args, options = {}) =>
-    (deps.run || run)(
-      elevation ? "sudo" : program,
-      elevation ? ["-n", program, ...args] : args,
-      { ...options, env: SAFE_ENV },
-    );
+  let lock;
+  const exec = (program, args, options = {}) =>
+    lock
+      ? lock.run(program, args, options)
+      : (deps.run || run)(
+          elevation ? "sudo" : program,
+          elevation ? ["-n", program, ...args] : args,
+          { ...options, env: SAFE_ENV },
+        );
+  // Stateful unit boundaries model lock acquisition. Production uses a kernel
+  // lock and a credential-free helper for the whole network transaction.
+  if (!deps.run) {
+    exec.acquire = async () => {
+      lock = await acquireLock(elevation);
+    };
+    exec.release = async () => {
+      await lock.release();
+      lock = undefined;
+    };
+  }
+  return exec;
 }
 async function json(exec, args) {
   return JSON.parse((await exec("ip", ["-j", "-N", ...args])).stdout);
 }
 async function withLock(exec, fn) {
+  if (exec.acquire) {
+    await exec.acquire();
+    try {
+      return await fn();
+    } finally {
+      await exec.release();
+    }
+  }
   let acquired = false;
   for (let i = 0; i < 100; i++) {
     const result = await exec("mkdir", ["-m", "0700", LOCK], {
@@ -133,6 +157,7 @@ async function preflight(config, deps = {}) {
       "Transparent private DNS requires the systemd-resolved stub resolver",
     );
   await exec("unzip", ["-v"]);
+  await exec("flock", ["--version"]);
   return { elevation, uid, ...(await resolveGateway(config, deps)) };
 }
 function sameRule(actual, want, table) {
@@ -265,6 +290,7 @@ async function setupNetwork(manifestPath, config, deps = {}) {
       network.intents.push(label);
       await saveManifest(manifestPath, state);
       await exec(program, args);
+      if (deps.afterMutation) await deps.afterMutation(label);
     };
     network.linkIntent = true;
     await mutation("link", "ip", [
@@ -411,13 +437,49 @@ async function verifyNetwork(manifestPath, config, deps = {}) {
   }
 }
 async function blockNetwork(manifestPath, deps = {}) {
-  const state = await readManifest(manifestPath);
+  let state = await readManifest(manifestPath);
   if (!state.network) return;
-  const network = state.network,
-    exec = command(deps, network.elevation);
+  let network = state.network;
+  const exec = command(deps, network.elevation);
   await withLock(exec, async () => {
+    state = await readManifest(manifestPath);
+    network = state.network;
+    if (network.cleaned) return;
     await ownedLink(exec, network);
     for (const route of network.routes.filter((r) => r.to !== "default")) {
+      const current = await json(exec, [
+        `-${route.family}`,
+        "route",
+        "show",
+        "table",
+        String(network.table),
+      ]);
+      const candidates = current.filter(
+        (actual) =>
+          parseCidr(
+            actual.dst === "default"
+              ? route.family === 4
+                ? "0.0.0.0/0"
+                : "::/0"
+              : actual.dst.includes("/")
+                ? actual.dst
+                : `${actual.dst}/${route.family === 4 ? 32 : 128}`,
+          ).canonical === route.to,
+      );
+      const variants = [
+        route,
+        ...(route.blockFrom ? [{ ...route, ...route.blockFrom }] : []),
+      ];
+      if (
+        !candidates.length ||
+        candidates.some(
+          (actual) =>
+            !variants.some((want) => sameRoute(actual, want, network.table)),
+        )
+      )
+        throw new Error(
+          "Private route ownership changed; refusing replacement",
+        );
       // Journal both possible states before replace: a crash or command failure
       // can leave either the original route or its unreachable replacement.
       route.blockFrom ??= {
@@ -432,11 +494,15 @@ async function blockNetwork(manifestPath, deps = {}) {
   });
 }
 async function cleanupNetwork(manifestPath, deps = {}) {
-  const state = await readManifest(manifestPath),
+  let state = await readManifest(manifestPath),
     network = state.network;
   if (!network || network.cleaned) return;
   const exec = command(deps, network.elevation);
   await withLock(exec, async () => {
+    // Blocking and post can overlap. Read the journal after acquiring the lock.
+    state = await readManifest(manifestPath);
+    network = state.network;
+    if (network.cleaned) return;
     const link = await ownedLink(exec, network),
       errors = [];
     const safely = async (fn) => {

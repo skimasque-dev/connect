@@ -30,6 +30,41 @@ async function fixture(t, extras = {}) {
   });
   return { path: m.path, config };
 }
+
+test("supervisor death before child journaling leaves no orphan relay", async (t) => {
+  const f = await fixture(t, { childJournalDelayMs: 4000 });
+  await launchSupervisor(f.config, f.path);
+  const readyFile = path.join(path.dirname(f.path), "client-ready.json");
+  for (let i = 0; i < 250; i++) {
+    if (
+      await fs.access(readyFile).then(
+        () => true,
+        () => false,
+      )
+    )
+      break;
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  const record = JSON.parse(await fs.readFile(readyFile, "utf8"));
+  const { identify, alive, terminateOwned } = require("../src/process.cjs");
+  const actual = await identify(record.pid);
+  t.after(() => terminateOwned(actual).catch(() => {}));
+  const state = await readManifest(f.path);
+  assert.equal(
+    state.processes.client,
+    undefined,
+    "kill before actual child identity is committed",
+  );
+  process.kill(state.processes.supervisor.pid, "SIGKILL");
+  for (let i = 0; i < 100 && (await alive(state.processes.supervisor)); i++)
+    await new Promise((r) => setTimeout(r, 40));
+  await stop(f.path);
+  assert.equal(
+    await alive(actual),
+    false,
+    "relay must stop even without a committed actual-child record",
+  );
+});
 test("supervisor publishes both listeners and explicit stop is idempotent", async (t) => {
   const f = await fixture(t);
   await launchSupervisor(f.config, f.path);

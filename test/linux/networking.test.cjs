@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const net = require("node:net");
 const dns = require("node:dns/promises");
+const { spawn } = require("node:child_process");
 const { setTimeout: delay } = require("node:timers/promises");
 const { run } = require("../../src/command.cjs");
 const { start } = require("../../src/main.cjs");
@@ -84,6 +85,14 @@ if (process.env.SKIMASQUE_TEST_INSIDE !== "1") {
     ])
       delete process.env[name];
     const dir = process.env.SKIMASQUE_CASE_DIR;
+    const auditDir = path.join(dir, "skm-post-audit");
+    await fs.mkdir(auditDir);
+    const auditEnv = { ...process.env, RUNNER_TEMP: dir };
+    await run(
+      process.execPath,
+      [path.join(__dirname, "../post-audit/register.cjs")],
+      { env: auditEnv },
+    );
     assert.notEqual(
       process.getuid(),
       0,
@@ -110,6 +119,36 @@ if (process.env.SKIMASQUE_TEST_INSIDE !== "1") {
       startupTimeout: 15000,
       probeTarget: "10.42.0.10:18080",
     };
+    const crashConfig = path.join(dir, "crash-config.json"),
+      crashSignal = path.join(dir, "crash-signal");
+    await fs.writeFile(crashConfig, JSON.stringify(config));
+    const crashed = spawn(
+      process.execPath,
+      [path.join(__dirname, "crash-setup.cjs"), crashConfig, crashSignal],
+      { stdio: ["ignore", "inherit", "inherit"] },
+    );
+    for (let i = 0; i < 200; i++) {
+      if (
+        await fs.access(crashSignal).then(
+          () => true,
+          () => false,
+        )
+      )
+        break;
+      await delay(50);
+    }
+    const crashManifest = await fs.readFile(crashSignal, "utf8");
+    crashed.kill("SIGKILL");
+    await new Promise((resolve) => crashed.once("exit", resolve));
+    await run(process.execPath, [path.join(__dirname, "../../src/post.cjs")], {
+      env: { ...process.env, STATE_manifest: crashManifest },
+    });
+    assert.equal((await readManifest(crashManifest)).phase, "cleaned");
+    assert.ok(
+      !JSON.parse((await run("ip", ["-j", "link", "show"])).stdout).some(
+        (link) => link.ifname.startsWith("skm"),
+      ),
+    );
     const before4 = JSON.parse(
       (await run("ip", ["-j", "-4", "rule", "show"])).stdout,
     );
@@ -177,6 +216,15 @@ if (process.env.SKIMASQUE_TEST_INSIDE !== "1") {
       env: { ...process.env, STATE_manifest: instance.manifestPath },
     });
     await stop(instance.manifestPath);
+    await fs.writeFile(
+      path.join(auditDir, "manifest-path"),
+      instance.manifestPath,
+    );
+    await run(
+      process.execPath,
+      [path.join(__dirname, "../post-audit/verify.cjs")],
+      { env: auditEnv },
+    );
     assert.deepEqual(
       JSON.parse((await run("ip", ["-j", "-4", "rule", "show"])).stdout),
       before4,

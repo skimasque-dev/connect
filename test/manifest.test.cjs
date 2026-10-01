@@ -24,3 +24,29 @@ test("state is atomic, instance-specific, contains no credential environment, an
   await fs.writeFile(first.path, JSON.stringify({ schema: 999 }));
   await assert.rejects(readManifest(first.path), /manifest/);
 });
+
+test(
+  "transient Windows sharing failures retry atomic replacement",
+  { skip: process.platform !== "win32" },
+  async (t) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "skm-state-retry-"));
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    const m = await createManifest(dir, { mode: "proxy" });
+    const rename = fs.rename;
+    let failed = false;
+    fs.rename = async (...args) => {
+      if (!failed) {
+        failed = true;
+        throw Object.assign(new Error("sharing violation"), { code: "EPERM" });
+      }
+      return rename(...args);
+    };
+    try {
+      m.state.phase = "ready";
+      await saveManifest(m.path, m.state);
+    } finally {
+      fs.rename = rename;
+    }
+    assert.equal((await readManifest(m.path)).phase, "ready");
+  },
+);
