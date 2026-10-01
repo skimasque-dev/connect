@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: skimasque-dev/skimasque
-          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || (github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' && 'feat/deployment-networking') || 'main' }}
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || ((github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' || github.event_name == 'push' && github.ref_name == 'feat/deployment-networking') && 'feat/deployment-networking') || 'main' }}
           path: client-source
       - uses: actions/setup-node@v4
         with:
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: skimasque-dev/skimasque
-          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || (github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' && 'feat/deployment-networking') || 'main' }}
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || ((github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' || github.event_name == 'push' && github.ref_name == 'feat/deployment-networking') && 'feat/deployment-networking') || 'main' }}
           path: client-source
       - uses: actions/setup-node@v4
         with:
