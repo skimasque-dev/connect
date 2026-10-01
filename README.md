@@ -4,11 +4,13 @@ Give a GitHub Actions job identity-bound access to private services through a
 SkiMasque MASQUE gateway. The client exchanges GitHub OIDC for a short-lived
 credential and renews it while the job runs. Policy controls each TCP/UDP tunnel.
 
-**Release compatibility:** main contains the transparent/proxy interface and native
-TUN client integration. Use coordinated Action/client releases: proxy mode requires
-`proxy-ready-v1` and transparent mode also requires `proxy-tun-v1`. Merging to main
-does not move an existing `@v1` tag. Pin compatible releases or use `client-bin`
-from the matching implementation; capability checks reject older clients.
+Use `skimasque-dev/connect@v2` with a compatible client release. Proxy mode
+requires `proxy-ready-v1`; transparent mode also requires `proxy-tun-v1`.
+The Action checks these capabilities before starting.
+
+Action and client versions are independent. When pinning an exact Action tag,
+set `with.version` to the desired skimasque client release. With `@v2` and no
+version input, the installer selects the latest client release.
 
 ## Transparent access (default)
 
@@ -24,7 +26,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: skimasque-dev/connect@v1 # use the coordinated new release
+      - uses: skimasque-dev/connect@v2 # requires a compatible client release
         with:
           proxy: gateway.example.com:443
           audience: https://gateway.example.com
@@ -65,7 +67,7 @@ It requires no elevated privileges. HTTP and HTTPS CONNECT use the HTTP
 listener; SOCKS clients can use TCP CONNECT and UDP ASSOCIATE.
 
 ```yaml
-- uses: skimasque-dev/connect@v1 # use the coordinated new release
+- uses: skimasque-dev/connect@v2 # requires a compatible client release
   with:
     mode: proxy
     proxy: gateway.example.com:443
@@ -130,9 +132,9 @@ For early cleanup, check out the same Action source and use `state-file`:
 - uses: actions/checkout@v4
   with:
     repository: skimasque-dev/connect
-    ref: v1 # same coordinated release as the Action
+    ref: v2 # same major release as the Action
     path: .connect-action
-- uses: skimasque-dev/connect@v1
+- uses: skimasque-dev/connect@v2
   id: network
   with:
     mode: proxy
