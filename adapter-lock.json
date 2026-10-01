@@ -1,0 +1,15 @@
+{
+  "version": "v2.7.0",
+  "artifacts": {
+    "x64": {
+      "name": "tun2socks-linux-amd64.zip",
+      "binary": "tun2socks-linux-amd64",
+      "sha256": "a612baa287a3b6de6221f74fd02b442a50888508227ecf51e1288a5ccbb77381"
+    },
+    "arm64": {
+      "name": "tun2socks-linux-arm64.zip",
+      "binary": "tun2socks-linux-arm64",
+      "sha256": "3931476c9cfa8fa236d23aeaf36767df0eb27cc11ecaab699faba57744450f49"
+    }
+  }
+}
