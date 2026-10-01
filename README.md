@@ -38,7 +38,9 @@ jobs:
 
 Transparent mode requires Ubuntu Linux, `/dev/net/tun`, `ip`, `unzip`, a working
 systemd-resolved stub at `127.0.0.53`, and root or passwordless sudo. Use a current
-GitHub runner supporting Node 24. IPv6 must be enabled for IPv6 routes or DNS.
+GitHub runner supporting Node 24, at least
+[v2.327.1](https://github.com/actions/checkout#checkout-v5). IPv6 must be enabled
+for IPv6 routes or DNS.
 Remove inherited `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and lowercase equivalents:
 they could bypass split routing. Unsupported runners fail before network changes;
 select `mode: proxy` explicitly for fallback.
