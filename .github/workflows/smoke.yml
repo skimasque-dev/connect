@@ -45,12 +45,6 @@ jobs:
         with:
           node-version: "24"
       - run: rustup toolchain install 1.88.0 --profile minimal
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            client-source/target
-          key: networking-${{ runner.os }}-${{ hashFiles('client-source/Cargo.lock') }}
       - run: cargo +1.88.0 build --locked -p skimasque-cli
         working-directory: client-source
       - name: Download and verify adapter
