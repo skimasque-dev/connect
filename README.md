@@ -4,25 +4,13 @@ Give a GitHub Actions job identity-bound access to private services through a
 SkiMasque MASQUE gateway. The client exchanges GitHub OIDC for a short-lived
 credential and renews it while the job runs. Policy controls each TCP/UDP tunnel.
 
-**Release compatibility:** main contains the transparent/proxy interface and native
-TUN client integration. Use coordinated Action/client releases: proxy mode requires
-`proxy-ready-v1` and transparent mode also requires `proxy-tun-v1`. Merging to main
-does not move an existing release tag. `@v1` retains the legacy SOCKS-only
-interface; current examples target `@v2`. Pin compatible releases or use `client-bin`
-from the matching implementation; capability checks reject older clients.
+Use `skimasque-dev/connect@v2` with a compatible client release. Proxy mode
+requires `proxy-ready-v1`; transparent mode also requires `proxy-tun-v1`.
+The Action checks these capabilities before starting.
 
-## Migrating from v1
-
-Use `skimasque-dev/connect@v2` for the current interface. For proxy-aware tools,
-set `mode: proxy` explicitly. Transparent mode is the default and requires private
-routes, DNS servers and DNS domains on a supported dedicated Ubuntu runner.
-The runtime now requires Node 24-compatible runners, and the Action owns post-job
-cleanup. Keep `@v1` only when intentionally using the legacy SOCKS-only interface.
-
-Action and client versions are independent. With an exact Action tag such as
-`@v2.0.0`, set `with.version` to a compatible **skimasque client** release;
-otherwise the installer interprets the Action's exact tag as the client version.
-The moving `@v2` tag resolves to the latest client release when no version is set.
+Action and client versions are independent. When pinning an exact Action tag,
+set `with.version` to the desired skimasque client release. With `@v2` and no
+version input, the installer selects the latest client release.
 
 ## Transparent access (default)
 

@@ -248,7 +248,7 @@
         own token. The declared <code>application</code> is context matched by policy, not verified proof of the running program.
         Transparent mode additionally requires private CIDRs, DNS servers and routing domains. Include
         both address families when services publish A and AAAA records. These examples require the
-        coordinated new client and Action release; older <code>@v1</code> tags retain their previous behavior.
+        compatible client and Action releases.
       </p>
       <div class="grid g3">
         <div class="card"><span class="tag">WHO</span><h3>The job's identity</h3><p>The runner's OIDC token carries the repository, workflow, and ref. The gateway verifies it; no secret is stored in CI.</p></div>

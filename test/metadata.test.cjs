@@ -43,7 +43,7 @@ test("README documents every metadata input and valid deployment examples", () =
     "HTTPS_PROXY",
     "ALL_PROXY",
     "NO_PROXY",
-    "coordinated",
+    "proxy-tun-v1",
     "id-token: write",
   ])
     assert.ok(readme.includes(value));
