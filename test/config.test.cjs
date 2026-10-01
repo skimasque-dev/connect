@@ -123,3 +123,27 @@ test("old clients fail with an actionable compatibility error", () => {
     ],
   });
 });
+
+test("transparent mode requires native capability while proxy remains portable", () => {
+  const caps = {
+    schema: 1,
+    features: [
+      "proxy-http",
+      "proxy-connect",
+      "proxy-socks5",
+      "proxy-socks5-udp",
+      "proxy-ready-v1",
+    ],
+  };
+  assert.doesNotThrow(() => validateCapabilities(caps, "proxy"));
+  assert.throws(
+    () => validateCapabilities(caps, "transparent"),
+    /proxy-tun-v1/,
+  );
+  assert.doesNotThrow(() =>
+    validateCapabilities(
+      { ...caps, features: [...caps.features, "proxy-tun-v1"] },
+      "transparent",
+    ),
+  );
+});

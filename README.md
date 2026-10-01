@@ -99,20 +99,20 @@ Transparent mode exports no global proxy variables.
 | `version` | action ref | Client release; moving refs resolve to latest. |
 | `repository` | `skimasque-dev/skimasque` | Client release repository. |
 | `client-bin` | empty | Existing client; required capabilities still checked. |
-| `tun2socks-bin` | empty | Existing tun2socks v2.7.0; otherwise pinned, hashed download. |
 | `probe-target` | empty | Optional `host:port` TCP readiness check. |
 | `startup-timeout` | `30` | Startup timeout seconds, `1`–`300`. |
 
 Outputs: `mode`, `http-proxy`, `socks-proxy`, `state-file`. Explicit proxy URLs are
 available in either mode. Downloaded client archives are checksum verified;
-adapter hashes are committed in `adapter-lock.json`. Downloads support Linux
+native TUN forwarding is embedded using tun-rs and a smoltcp-based stack. No
+additional networking executable is downloaded. Client downloads support Linux
 amd64/arm64, Windows amd64 and macOS arm64; other platforms need `client-bin`.
 
 ## Readiness and cleanup
 
-Ready means authenticated client readiness, both listeners, adapter startup and
+Ready means authenticated client readiness, both listeners, native TUN attachment and
 verified routes/DNS. `probe-target` adds a real TCP check. The supervisor watches
-children throughout the job. If either dies, private routes become unreachable
+the unprivileged client throughout the job. If the client dies, private routes become unreachable
 until cleanup while public routing continues. Diagnostics and a write-ahead
 ownership manifest live under `RUNNER_TEMP`. No OIDC/platform credential is
 saved there. Proxy mode saves previous proxy variables in its protected manifest.
@@ -156,3 +156,10 @@ For a private CA and reproducible downloads, add `ca: ./gateway-ca.pem` and
 The gateway lives in [skimasque](https://github.com/skimasque-dev/skimasque).
 See [test/linux/README.md](test/linux/README.md) for isolated integration tests.
 MIT — see [LICENSE](LICENSE).
+
+## Planned next feature
+
+A named connection profile will let a workflow specify `connection: staging`.
+GitHub OIDC will identify the repository, and its authorized control-plane profile
+will supply gateway, audience, routes and private DNS settings. This interface is
+planned; current workflows use the explicit inputs above.

@@ -43,9 +43,6 @@ inputs:
   client-bin:
     description: Use this existing client binary; capability checks still apply.
     default: ""
-  tun2socks-bin:
-    description: Use this existing tun2socks v2.7.0 adapter in transparent mode instead of downloading verified pinned artifacts.
-    default: ""
   probe-target:
     description: Optional host:port to verify real TCP connectivity before reporting readiness.
     default: ""

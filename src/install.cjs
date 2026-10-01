@@ -3,7 +3,6 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { run } = require("./command.cjs");
-const lock = require("../adapter-lock.json");
 function targetFor(platform, arch) {
   const target = {
     "linux/x64": "x86_64-unknown-linux-gnu",
@@ -113,29 +112,4 @@ async function installClient(config, directory, deps = {}) {
     ),
   );
 }
-async function installAdapter(config, directory, deps = {}) {
-  if (config.adapterBin) return binaryOverride(config.adapterBin);
-  if ((config.platform || process.platform) !== "linux")
-    throw new Error("Transparent adapter is only supported on Linux");
-  const item = lock.artifacts[config.arch || process.arch];
-  if (!item) throw new Error("Unsupported transparent adapter architecture");
-  const bytes = await download(
-    `https://github.com/xjasonlyu/tun2socks/releases/download/${lock.version}/${item.name}`,
-    deps,
-  );
-  verifyDigest(bytes, item.sha256);
-  const dest = path.join(directory, "adapter");
-  await fs.mkdir(dest, { recursive: true });
-  const archive = path.join(dest, item.name);
-  await fs.writeFile(archive, bytes, { mode: 0o600 });
-  const command = deps.run || run;
-  const entries = (await command("unzip", ["-Z1", archive])).stdout;
-  validateEntries(entries);
-  if (entries.trim() !== item.binary)
-    throw new Error("Unexpected adapter archive contents");
-  await command("unzip", ["-qq", archive, "-d", dest]);
-  const binary = path.join(dest, item.binary);
-  await fs.chmod(binary, 0o755);
-  return binaryOverride(binary);
-}
-module.exports = { installClient, installAdapter, verifyDigest, targetFor };
+module.exports = { installClient, verifyDigest, targetFor };

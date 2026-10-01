@@ -66,17 +66,19 @@ ip netns exec skm-public python3 "$script_dir/services.py" public > "$case_dir/p
 export SKIMASQUE_TOKEN=network-test-credential
 ip netns exec skm-gateway "$SKIMASQUE_SERVER_BIN" \
   --listen 192.0.2.1:4433 --authority localhost:4433 \
+  --auth-token network-test-credential \
   --self-signed-name localhost --write-cert "$case_dir/ca.pem" \
   --allow-cidr 10.42.0.0/24 --allow-cidr fd42::/64 \
   --allow-cidr 10.43.0.53/32 --allow-cidr fd43::53/128 \
   --policy-file "$script_dir/policy.toml" > "$case_dir/gateway.log" 2>&1 &
+export SKIMASQUE_TEST_GATEWAY_PID=$!
 for _ in $(seq 1 100); do
   if [[ -s "$case_dir/ca.pem" ]] && resolvectl status >/dev/null 2>&1; then break; fi
   sleep 0.1
 done
 [[ -s "$case_dir/ca.pem" ]]
 # Exercise the same privilege split as a hosted runner: only network commands
-# use sudo; the supervisor, credential-bearing client and adapter are unprivileged.
+# use sudo; the supervisor and credential-bearing native client are unprivileged.
 mkdir "$case_dir/sudoers"
 printf 'nobody ALL=(root) NOPASSWD: ALL\n' > "$case_dir/sudoers/integration"
 chmod 0440 "$case_dir/sudoers/integration"

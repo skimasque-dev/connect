@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: skimasque-dev/skimasque
-          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || 'main' }}
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || (github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' && 'feat/deployment-networking') || 'main' }}
           path: client-source
       - uses: actions/setup-node@v4
         with:
@@ -53,10 +53,6 @@ jobs:
           key: networking-${{ runner.os }}-${{ hashFiles('client-source/Cargo.lock') }}
       - run: cargo +1.88.0 build --locked -p skimasque-cli
         working-directory: client-source
-      - name: Download and verify adapter
-        run: |
-          mkdir -p .test-bin
-          node -e 'require("./src/install.cjs").installAdapter({platform:"linux",arch:"x64"},".test-bin").then(console.log).catch(e=>{console.error(e);process.exitCode=1})'
       - run: docker build -t skimasque-network-tests -f test/linux/Dockerfile .
       - name: Verify real private networking in disposable isolated namespaces
         run: |
@@ -64,7 +60,6 @@ jobs:
             -v "$PWD:/action:ro" \
             -e SKIMASQUE_CLIENT_BIN=/action/client-source/target/debug/skimasque-client \
             -e SKIMASQUE_SERVER_BIN=/action/client-source/target/debug/skimasque-server \
-            -e SKIMASQUE_ADAPTER_BIN=/action/.test-bin/adapter/tun2socks-linux-amd64 \
             skimasque-network-tests node --test /action/test/linux/networking.test.cjs
 
   action-post:
@@ -83,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: skimasque-dev/skimasque
-          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || 'main' }}
+          ref: ${{ inputs.client-ref || vars.SKIMASQUE_CLIENT_REF || (github.event_name == 'pull_request' && github.head_ref == 'feat/deployment-networking' && 'feat/deployment-networking') || 'main' }}
           path: client-source
       - uses: actions/setup-node@v4
         with:

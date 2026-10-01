@@ -1,26 +1,25 @@
 # Real networking verification
 
-This suite uses real client/server binaries, tun2socks v2.7.0, Linux TUN,
+This suite uses real client/server binaries with embedded tun-rs/smoltcp, Linux TUN,
 iproute2 and systemd-resolved. An outer mount/network/PID namespace isolates
 the test from the host. Nested namespaces separate runner, gateway, private
 services/DNS and public services. Never run the fixture on a shared runner.
 
-Build the matching client with Rust 1.88 or later, and download the adapter with
-`installAdapter` (which verifies the committed hash). On dedicated Ubuntu:
+Build the matching native-capable client with Rust 1.88 or later. On dedicated Ubuntu:
 
 ```sh
-sudo --preserve-env=SKIMASQUE_CLIENT_BIN,SKIMASQUE_SERVER_BIN,SKIMASQUE_ADAPTER_BIN \
+sudo --preserve-env=SKIMASQUE_CLIENT_BIN,SKIMASQUE_SERVER_BIN \
   node --test test/linux/networking.test.cjs
 ```
 
-Set those three variables to absolute binary paths. Install iproute2, dbus,
-systemd-resolved, unzip and Python 3. The CI workflow uses a disposable
+Set those two variables to absolute binary paths. Install iproute2, dbus,
+systemd-resolved and Python 3. The CI workflow uses a disposable
 privileged container built from `Dockerfile`, so resolver changes remain inside
 that container and the outer test namespace.
 
 Coverage includes raw private TCP with both families, private DNS outside the
 configured CIDRs, hostname A/AAAA resolution, UDP DNS, TCP DNS, policy refusal,
-unchanged public routes, adapter failure with a usable underlying private route,
+unchanged public routes, native client and gateway failure with a usable underlying private route,
 idempotent explicit cleanup and the same post entrypoint used by GitHub Actions.
 Portable tests additionally inject failures before every network mutation,
 preserve unrelated state, reject foreign ownership, verify concurrent resources,

@@ -7,7 +7,6 @@ const os = require("node:os");
 const { createHash } = require("node:crypto");
 const {
   installClient,
-  installAdapter,
   verifyDigest,
   targetFor,
 } = require("../src/install.cjs");
@@ -38,29 +37,12 @@ test("explicit binary override is checked and avoids any download", async (t) =>
     },
   };
   assert.equal(await installClient({ clientBin }, dir, deps), clientBin);
-  assert.equal(
-    await installAdapter({ adapterBin: clientBin }, dir, deps),
-    clientBin,
-  );
   await assert.rejects(
     installClient({ clientBin: path.join(dir, "missing") }, dir, deps),
     /binary|ENOENT/,
   );
 });
 
-test("an adapter download uses the committed architecture hash", async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "skm-adapter-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  let extracted = false;
-  await assert.rejects(
-    installAdapter({ platform: "linux", arch: "x64" }, dir, {
-      fetch: async () => new Response(Buffer.from("wrong bytes")),
-      run: async () => {
-        extracted = true;
-        return { stdout: "", code: 0 };
-      },
-    }),
-    /checksum/,
-  );
-  assert.equal(extracted, false);
+test("native networking has no external adapter installer", () => {
+  assert.equal(require("../src/install.cjs").installAdapter, undefined);
 });

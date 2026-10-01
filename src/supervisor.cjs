@@ -100,6 +100,11 @@ async function readReady(file, child, config, timeoutMs) {
       loopbackEndpoint(value.socks);
       if (value.http.endsWith(":0") || value.socks.endsWith(":0"))
         throw new Error("Client ready record has unbound listeners");
+      if (
+        config.mode === "transparent" &&
+        value.tun_interface !== config.tunInterface
+      )
+        throw new Error("Client ready TUN does not match owned interface");
       return value;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -333,9 +338,23 @@ async function worker(manifestPath) {
     return child;
   };
   try {
+    let networkConfig;
+    if (config.mode === "transparent") {
+      networkConfig = {
+        ...validateTransparent(config, config.gatewayIps),
+        uid: config.uid,
+        elevation: config.elevation,
+      };
+      await setupNetwork(manifestPath, networkConfig);
+      state = await readManifest(manifestPath);
+      config.tunInterface = state.network.interface;
+    }
     const client = await spawnChild("client", config.clientBin, [
       ...connectionArgs(config),
       "proxy",
+      ...(config.mode === "transparent"
+        ? ["--tun-interface", config.tunInterface]
+        : []),
       "--http-listen",
       config.httpListen,
       "--socks-listen",
@@ -351,31 +370,13 @@ async function worker(manifestPath) {
     );
     if (stopping) throw new Error("Startup stopped");
     if (config.mode === "transparent") {
-      const networkConfig = {
-        ...validateTransparent(config, config.gatewayIps),
-        uid: config.uid,
-        elevation: config.elevation,
-      };
-      await setupNetwork(manifestPath, networkConfig);
-      state = await readManifest(manifestPath);
-      const adapter = await spawnChild("adapter", config.adapterBin, [
-        "--device",
-        `tun://${state.network.interface}`,
-        "--proxy",
-        `socks5://${ready.socks}`,
-        "--loglevel",
-        "warn",
-      ]);
-      await delay(300);
-      if (adapter.exitCode !== null || adapter.signalCode !== null)
-        throw new Error(
-          "Transparent adapter exited during startup; inspect adapter.log",
-        );
       await verifyNetwork(manifestPath, networkConfig);
     }
     if (config.probeTarget) {
+      // A local stack can complete the TCP handshake before the gateway has
+      // authorized CONNECT. Check the authenticated tunnel before readiness.
+      await proxyProbe(ready.http, config.probeTarget);
       if (config.mode === "transparent") await tcpProbe(config.probeTarget);
-      else await proxyProbe(ready.http, config.probeTarget);
     }
     if (stopping) throw new Error("Startup stopped");
     if (children.some((c) => c.exitCode !== null || c.signalCode !== null))

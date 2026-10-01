@@ -70,11 +70,38 @@ def tcp_dns(host):
         threading.Thread(target=handle, args=(client,), daemon=True).start()
 
 
+def udp_echo(host, port):
+    server = socket_for(host, socket.SOCK_DGRAM)
+    server.bind((host, port))
+    while True:
+        data, source = server.recvfrom(65535)
+        server.sendto(data, source)
+
+
+def bulk(host):
+    import hashlib
+    server = socket_for(host, socket.SOCK_STREAM)
+    server.bind((host, 18083))
+    server.listen()
+    def handle(client):
+        with client:
+            digest = hashlib.sha256()
+            while data := client.recv(65536):
+                digest.update(data)
+            client.sendall(digest.digest())
+    while True:
+        client, _ = server.accept()
+        threading.Thread(target=handle, args=(client,), daemon=True).start()
+
+
 if sys.argv[1] == 'public':
     echo('198.51.100.10', 18081, 'public:')
 else:
     for host in ['10.42.0.10', 'fd42::10']:
         threading.Thread(target=echo, args=(host, 18080, 'echo:'), daemon=True).start()
+        threading.Thread(target=bulk, args=(host,), daemon=True).start()
+        for port in (18080, 18084):
+            threading.Thread(target=udp_echo, args=(host, port), daemon=True).start()
     for host in ['10.43.0.53', 'fd43::53']:
         threading.Thread(target=udp_dns, args=(host,), daemon=True).start()
         threading.Thread(target=tcp_dns, args=(host,), daemon=True).start()

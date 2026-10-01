@@ -81,7 +81,6 @@ function readConfig(env = process.env) {
     version: input("version") || env.GITHUB_ACTION_REF || "main",
     repository,
     clientBin: input("client-bin"),
-    adapterBin: input("tun2socks-bin"),
     probeTarget: input("probe-target"),
     startupTimeout: startupTimeout * 1000,
     runnerTemp: path.resolve(env.RUNNER_TEMP),
@@ -137,7 +136,11 @@ function validateTransparent(config, gatewayIps) {
     families: [...new Set(unique.map((r) => r.family))].sort(),
   };
 }
-function validateCapabilities(value) {
+function validateCapabilities(value, mode = "proxy") {
+  if (mode === "transparent" && !value?.features?.includes("proxy-tun-v1"))
+    throw new Error(
+      "Native transparent mode requires proxy-tun-v1; install a newer skimasque-client release",
+    );
   if (
     value?.schema !== 1 ||
     !Array.isArray(value.features) ||

@@ -13,6 +13,7 @@ if (args.includes("capabilities")) {
         "proxy-socks5",
         "proxy-socks5-udp",
         "proxy-ready-v1",
+        "proxy-tun-v1",
       ],
     }),
   );
@@ -26,6 +27,11 @@ if (args.includes("capabilities")) {
           value("--ready-file"),
           JSON.stringify({
             schema: 1,
+            tun_interface: args.includes("--tun-interface")
+              ? args.includes("--wrong-tun")
+                ? "skm-wrong"
+                : value("--tun-interface")
+              : null,
             pid: process.pid,
             http: `127.0.0.1:${http.address().port}`,
             socks: `127.0.0.1:${socks.address().port}`,

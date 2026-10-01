@@ -6,7 +6,7 @@ const {
   validateTransparent,
   validateCapabilities,
 } = require("./config.cjs");
-const { installClient, installAdapter } = require("./install.cjs");
+const { installClient } = require("./install.cjs");
 const { run } = require("./command.cjs");
 const { createManifest, saveManifest } = require("./manifest.cjs");
 const { preflight, resolveGateway } = require("./linux.cjs");
@@ -90,13 +90,7 @@ async function start(config, deps = {}) {
         "Client lacks required client capabilities; install a newer skimasque-client",
       );
     }
-    validateCapabilities(value);
-    if (config.mode === "transparent") {
-      config.adapterBin = await installAdapter(config, dir, deps);
-      const version = await (deps.run || run)(config.adapterBin, ["--version"]);
-      if (!/\bv?2\.7\.0\b/.test(version.stdout))
-        throw new Error("Transparent adapter must be pinned tun2socks v2.7.0");
-    }
+    validateCapabilities(value, config.mode);
     await launchSupervisor(config, manifestPath);
     const ready = await waitReady(manifestPath, config.startupTimeout + 5000);
     if (config.mode === "proxy" && env.GITHUB_ENV)
