@@ -13,6 +13,7 @@ const { preflight, resolveGateway } = require("./linux.cjs");
 const { launchSupervisor, waitReady } = require("./supervisor.cjs");
 const { stop } = require("./stop.cjs");
 const { proxyEnvironment, writeCommand } = require("./action-files.cjs");
+const { reportDiagnostics } = require("./diagnostics.cjs");
 
 async function start(config, deps = {}) {
   const env = deps.env || process.env;
@@ -115,6 +116,8 @@ async function start(config, deps = {}) {
         [error, cleanup],
         `${error.message}; cleanup failed: ${cleanup.message}`,
       );
+    } finally {
+      await reportDiagnostics(manifestPath, { write: deps.diagnosticWriter, env });
     }
     throw error;
   }

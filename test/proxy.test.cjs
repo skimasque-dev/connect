@@ -80,6 +80,27 @@ test("unsupported transparent mode rejects before downloading or exporting varia
 });
 module.exports = { commands };
 
+test("startup errors print client stderr by default and retain the original failure", async (t) => {
+  const f = await fixture(t);
+  const output = [];
+  await assert.rejects(
+    start(
+      {
+        ...f.config,
+        clientPrefix: [path.join(__dirname, "fixtures/failing-client.cjs")],
+      },
+      { env: f.env, diagnosticWriter: (line) => output.push(line) },
+    ),
+    /Client exited before readiness/,
+  );
+  assert.match(output.join("\n"), /credential exchange failed: unknown_org/);
+  assert.ok(!output.join("\n").includes("private-token"));
+  await assert.rejects(
+    fs.access(path.join(f.config.runnerTemp, "skimasque-proxy-active")),
+    { code: "ENOENT" },
+  );
+});
+
 test("a failure immediately after proxy lock creation releases only its owned lock", async (t) => {
   const f = await fixture(t);
   await assert.rejects(
