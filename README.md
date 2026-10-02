@@ -119,6 +119,12 @@ until cleanup while public routing continues. Diagnostics and a write-ahead
 ownership manifest live under `RUNNER_TEMP`. No OIDC/platform credential is
 saved there. Proxy mode saves previous proxy variables in its protected manifest.
 
+Startup failures automatically print the client and supervisor diagnostic log
+tails to the Actions console after rollback. The post hook also prints diagnostics
+for recorded client failures or cleanup errors. Output is bounded to the last
+16 KiB and 100 lines per log, with bearer credentials, JWTs and known runner tokens
+redacted. No workflow-specific logging step or debug input is needed.
+
 The Node Action registers an always-running post hook. Normal completion,
 failure and startup rollback stop owned processes and remove owned DNS, rules,
 routes and links. Cleanup verifies ownership and process creation identity,
